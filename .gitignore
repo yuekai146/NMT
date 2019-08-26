@@ -1,0 +1,8 @@
+playground/*
+*.pth
+*.log*
+__pycache__/*
+*.pyc
+
+sys.*
+ref.*
