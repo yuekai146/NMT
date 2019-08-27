@@ -308,15 +308,10 @@ def get():
 
 if __name__ == "__main__":
     net, criterion = get()
-    """
     batch = dummpy_input()
-    logits = net(**batch)
-    loss, nll_loss = criterion(logits, batch['tgt'], batch['tgt_mask'].squeeze())
-    loss.backward()
-    print(nll_loss.item())
-    """
-    numel = 0
-    for p in net.parameters():
-        print(p.size())
-        numel += p.numel()
-    print(numel)
+
+    for i in range(1000):
+        logits = net(**batch)
+        loss, nll_loss = criterion(logits, batch['tgt'], batch['tgt_mask'].squeeze())
+        loss.backward()
+        print(nll_loss.item())

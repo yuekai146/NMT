@@ -46,7 +46,7 @@ class Trainer(object):
 
         # data iterators
         self.iterators = {}
-        train_iter, valid_iter, SRC_TEXT, TGT_TEXT = dataset.get()
+        train_iter, valid_iter, SRC_TEXT, TGT_TEXT = dataset.get(params)
         self.iterators["train"] = train_iter
         self.iterators["valid"] = valid_iter
         self.num_train = len(train_iter)
@@ -275,6 +275,7 @@ class Enc_Dec_Trainer(Trainer):
                 raw_batch.src, raw_batch.tgt,
                 self.SRC_TEXT.vocab, self.TGT_TEXT.vocab
                 )
+        del raw_batch
         # Get a batch of input data
 
         # Network forward step
@@ -311,7 +312,15 @@ class Enc_Dec_Trainer(Trainer):
         """
         Evaluate perplexity and next word prediction accuracy.
         """
+        if self.params.local_rank != 0:
+            return 
+
         self.net.eval()
+        if config.multi_gpu:
+            self.net.module.eval()
+            net = self.net.module
+        else:
+            net = self.net
 
         data_iter = iter(self.iterators["valid"].get_iterator(True, True))
 
@@ -319,7 +328,7 @@ class Enc_Dec_Trainer(Trainer):
         xe_loss = 0
         n_valid = 0
 
-        for raw_batch in data_iter:
+        for i_batch, raw_batch in enumerate(data_iter):
             # generate batch
             batch = get_batch(
                     raw_batch.src, raw_batch.tgt,
@@ -332,7 +341,7 @@ class Enc_Dec_Trainer(Trainer):
             for k in inputs.keys():
                 assert k in batch
                 inputs[k] = batch[k]
-            logits = self.net(**inputs)
+            logits = net(**inputs)
 
             # loss
             loss_inputs = {"logits":None, "target":None, "target_mask":None}
@@ -348,7 +357,7 @@ class Enc_Dec_Trainer(Trainer):
             n_words += batch["n_tokens"]
             xe_loss += nll_loss.item() * batch["n_tokens"]
             n_valid += (logits.max(-1)[1] == batch["target"]).sum().item()
-            
+
             """
             def print_valid_trans():
                 trans = logits.max(-1)[1].cpu().numpy().tolist()
@@ -370,6 +379,7 @@ class Enc_Dec_Trainer(Trainer):
         scores = {}
         scores['ppl'] = np.exp(xe_loss / n_words)
         scores['acc'] = 100. * n_valid / n_words
+        print("Process {}, Validation batch {} finished!".format(self.params.local_rank, i_batch))
         ppl_info = '{}-{} validation ppl:{} '.format(config.SRC_LAN, config.TGT_LAN, scores['ppl'])
         acc_info = '{}-{} validation accuracy:{} '.format(config.SRC_LAN, config.TGT_LAN, scores['acc'])
         logger.info(ppl_info + '|' + acc_info)

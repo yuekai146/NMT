@@ -16,8 +16,9 @@ def main():
     params = parser.parse_args()
 
     # Initialize distributed training
-    torch.cuda.set_device(params.local_rank)
-    torch.distributed.init_process_group(backend="nccl",  init_method='env://')
+    if params.local_rank != -1:
+        torch.cuda.set_device(params.local_rank)
+        torch.distributed.init_process_group(backend="nccl",  init_method='env://')
     trainer = Enc_Dec_Trainer(params)
 
     # Check whether dump_path exists, if not create one
@@ -44,6 +45,7 @@ def main():
                 trainer.iter()
             except RuntimeError:
                 continue
+        print("Epoch {} finished!".format(i_epoch))
         scores = trainer.valid_step()
         trainer.save_best_model(scores)
         trainer.save_periodic()

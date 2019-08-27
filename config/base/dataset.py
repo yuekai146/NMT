@@ -8,6 +8,7 @@
 from common import config
 import math
 import numpy as np
+import os
 import torch
 
 
@@ -248,20 +249,37 @@ class ParallelDataset(Dataset):
         return self.get_batches_iterator(batches)
 
 
-def get():
+def get(params=None):
     SRC = Text(Vocab(config.SRC_VOCAB_PATH), False, False)
     TGT = Text(Vocab(config.TGT_VOCAB_PATH), True, True)
     
     def read_sents(fpath):
-        return open(fpath, 'r').read().split('\n')
+        return open(fpath, 'r').read().split('\n')[:-1]
+    src_sents = read_sents(config.SRC_RAW_TRAIN_PATH)
+    tgt_sents = read_sents(config.TGT_RAW_TRAIN_PATH)
+    assert len(src_sents) == len(tgt_sents)
 
-    train_iter = ParallelDataset(
-            read_sents(config.SRC_RAW_TRAIN_PATH),
-            read_sents(config.TGT_RAW_TRAIN_PATH),
-            SRC.vocab,
-            TGT.vocab
-            )
+    if config.multi_gpu == False:
+        train_iter = ParallelDataset(
+                src_sents,
+                tgt_sents,
+                SRC.vocab,
+                TGT.vocab
+                )
 
+    else:
+        assert params is not None
+        num_gpus = int(os.environ['NGPUS'])
+        n_sents = len(src_sents) // num_gpus
+        a = n_sents * params.local_rank
+        b = n_sents * (params.local_rank + 1)
+        train_iter = ParallelDataset(
+                src_sents[a:b],
+                tgt_sents[a:b],
+                SRC.vocab,
+                TGT.vocab
+                )
+    
     valid_iter = ParallelDataset(
             read_sents(config.SRC_RAW_VALID_PATH),
             read_sents(config.TGT_RAW_VALID_PATH),

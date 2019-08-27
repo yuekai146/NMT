@@ -6,7 +6,7 @@ class Config:
     d_model = 512
     d_ff = 1024
     num_heads = 4
-    dropout = 0.1
+    dropout = 0.3
     label_smoothing = 0.1
     share_encoder_decoder_embed = True
     
@@ -28,15 +28,14 @@ class Config:
     TGT_VOCAB_PATH = DATA_PATH + "/iwslt14_de_en/vocab.en"
 
     # Wrong n_vocab, should minus 1
-    src_n_vocab = len(open(SRC_VOCAB_PATH, 'r').read().split('\n')) + N_SPECIAL_TOKENS
-    tgt_n_vocab = len(open(TGT_VOCAB_PATH, 'r').read().split('\n')) + N_SPECIAL_TOKENS
+    src_n_vocab = len(open(SRC_VOCAB_PATH, 'r').read().split('\n')) - 1 + N_SPECIAL_TOKENS
+    tgt_n_vocab = len(open(TGT_VOCAB_PATH, 'r').read().split('\n')) - 1 + N_SPECIAL_TOKENS
     SRC_LAN = "de"
     TGT_LAN = "en"
     VALID_RATIO = 0.001
-    NGPUS = 1
-    BATCH_SIZE = 128 * NGPUS
-    tokens_per_batch = 3600 * NGPUS # if tokens_per_batch > 0, ignore BATCH_SIZE
-    max_batch_size = 1000 * NGPUS
+    BATCH_SIZE = 128
+    tokens_per_batch = 3600 # if tokens_per_batch > 0, ignore BATCH_SIZE
+    max_batch_size = 1000 
 
     # For optimizer
     opt_warmup = 4000
@@ -50,7 +49,7 @@ class Config:
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
     epoch_size = 60
-    continue_path = "checkpoints/checkpoint_67.pth"
+    continue_path = None
     dump_path = "checkpoints/"
     clip_grad_norm = 0.0
     accumulate_gradients = 1
