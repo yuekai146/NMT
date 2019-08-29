@@ -27,6 +27,7 @@ def test_model_numel():
         n += p.numel()
     print(n)
 
+
 def test():
     #test_mask()
     test_model_numel()

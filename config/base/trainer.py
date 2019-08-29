@@ -73,6 +73,10 @@ class Trainer(object):
         for k in config.valid_metrics.keys():
             factor = config.valid_metrics[k]
             self.best_metrics[k] = [config.init_metric * factor, factor]
+        self.decrease_counts = 0
+        self.decrease_counts_max = config.decrease_counts_max
+        self.stopping_criterion = config.stopping_criterion
+        assert ( self.stopping_criterion in self.best_metrics ) or ( self.stopping_criterion is None )
 
         # training statistics
         self.epoch = 0
@@ -90,7 +94,6 @@ class Trainer(object):
         self.reload_checkpoint()
 
 
-
     def optimize(self, loss):
         """
         Optimize.
@@ -104,18 +107,13 @@ class Trainer(object):
         if config.accumulate_gradients > 1:
             loss = loss / config.accumulate_gradients
         # regular optimization
+        loss.backward()
         if self.n_iter % config.accumulate_gradients == 0:
-            loss.backward()
             if config.clip_grad_norm > 0:
                 for name in names:
-                    # norm_check_a = (sum([p.grad.norm(p=2).item() ** 2 for p in self.parameters[name]])) ** 0.5
                     clip_grad_norm_(self.net.parameters(), config.clip_grad_norm)
-                    # norm_check_b = (sum([p.grad.norm(p=2).item() ** 2 for p in self.parameters[name]])) ** 0.5
-                    # print(name, norm_check_a, norm_check_b)
             self.opt.step()
             self.opt.optimizer.zero_grad()
-        else:
-            loss.backward()
 
 
     def iter(self):
@@ -256,8 +254,22 @@ class Trainer(object):
                 logger.info('New best score for %s: %.6f' % (metric_name, scores[metric_name]))
                 self.save_checkpoint('checkpoint_best_%s' % metric_name)
 
-    
-    def end_epoch(self):
+    def early_stop(self, scores):
+        if self.stopping_criterion is not None:
+            assert self.stopping_criterion in scores
+            factor = self.best_metrics[self.stopping_criterion][1]
+            val = self.best_metrics[self.stopping_criterion][0]
+            if factor * scores[self.stopping_criterion] > factor * val:
+                self.decrease_counts = 0
+            else:
+                self.decrease_counts += 1
+            
+            if self.decrease_counts >= self.decrease_counts_max:
+                exit()
+
+    def end_epoch(self, scores=None):
+        #if self.params.local_rank == 0:
+        #    self.early_stop(scores) 
         self.epoch += 1
 
 
@@ -269,6 +281,7 @@ class Enc_Dec_Trainer(Trainer):
         Can also be used for denoising auto-encoding.
         """
         self.net.train()
+        self.criterion.train()
         if config.multi_gpu:
             self.net.module.train()
         batch = get_batch(
@@ -313,9 +326,10 @@ class Enc_Dec_Trainer(Trainer):
         Evaluate perplexity and next word prediction accuracy.
         """
         if self.params.local_rank != 0:
-            return 
+            return
 
         self.net.eval()
+        self.criterion.eval()
         if config.multi_gpu:
             self.net.module.eval()
             net = self.net.module
@@ -327,59 +341,43 @@ class Enc_Dec_Trainer(Trainer):
         n_words = 0
         xe_loss = 0
         n_valid = 0
-
-        for i_batch, raw_batch in enumerate(data_iter):
-            # generate batch
-            batch = get_batch(
-                    raw_batch.src, raw_batch.tgt,
-                    self.SRC_TEXT.vocab, self.TGT_TEXT.vocab
-                    )
-
-
-            # Network forward step
-            inputs = {"src":None, "tgt":None, "src_mask":None, "tgt_mask":None}
-            for k in inputs.keys():
-                assert k in batch
-                inputs[k] = batch[k]
-            logits = net(**inputs)
-
-            # loss
-            loss_inputs = {"logits":None, "target":None, "target_mask":None}
-            for k in loss_inputs.keys():
-                assert ( k in batch ) or ( k == "logits" )
-                if k in batch:
-                    loss_inputs[k] = batch[k]
-                else:
-                    loss_inputs[k] = logits
-            loss, nll_loss = self.criterion(**loss_inputs) 
-
-            # update stats
-            n_words += batch["n_tokens"]
-            xe_loss += nll_loss.item() * batch["n_tokens"]
-            n_valid += (logits.max(-1)[1] == batch["target"]).sum().item()
-
-            """
-            def print_valid_trans():
-                trans = logits.max(-1)[1].cpu().numpy().tolist()
-                sents = []
-                for s in trans:
-                    sents.append(
-                            " ".join(self.TGT_TEXT.vocab.itos[x] for x in s).replace("@@ ", "")
-                            )
-                return sents
+        
+        with torch.no_grad():
+            
+            for i_batch, raw_batch in enumerate(data_iter):
+                # generate batch
+                batch = get_batch(
+                        raw_batch.src, raw_batch.tgt,
+                        self.SRC_TEXT.vocab, self.TGT_TEXT.vocab
+                        )
 
 
-            trans_sents = print_valid_trans()
-            for idx in range(len(trans_sents)):
-                print(trans_sents[idx].replace("<pad>", ""))
-            """
+                # Network forward step
+                inputs = {"src":None, "tgt":None, "src_mask":None, "tgt_mask":None}
+                for k in inputs.keys():
+                    assert k in batch
+                    inputs[k] = batch[k]
+                logits = net(**inputs)
 
+                # loss
+                loss_inputs = {"logits":None, "target":None, "target_mask":None}
+                for k in loss_inputs.keys():
+                    assert ( k in batch ) or ( k == "logits" )
+                    if k in batch:
+                        loss_inputs[k] = batch[k]
+                    else:
+                        loss_inputs[k] = logits
+                loss, nll_loss = self.criterion(**loss_inputs) 
+
+                # update stats
+                n_words += batch["n_tokens"]
+                xe_loss += nll_loss.item() * batch["n_tokens"]
+                n_valid += (logits.max(-1)[1] == batch["target"]).sum().item()
 
         # compute perplexity and prediction accuracy
         scores = {}
         scores['ppl'] = np.exp(xe_loss / n_words)
         scores['acc'] = 100. * n_valid / n_words
-        print("Process {}, Validation batch {} finished!".format(self.params.local_rank, i_batch))
         ppl_info = '{}-{} validation ppl:{} '.format(config.SRC_LAN, config.TGT_LAN, scores['ppl'])
         acc_info = '{}-{} validation accuracy:{} '.format(config.SRC_LAN, config.TGT_LAN, scores['acc'])
         logger.info(ppl_info + '|' + acc_info)

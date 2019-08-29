@@ -197,6 +197,7 @@ class ParallelDataset(Dataset):
         assert len(self.sent1) == len(self.sent2)
         return len(self.sent1)
 
+
     def get_batches_iterator(self, batches):
         """
         Return a sentences iterator, given the associated sentence batches.
@@ -210,12 +211,14 @@ class ParallelDataset(Dataset):
             sent2 = self.batch_sentences([self.sent2[idx] for idx in sentence_ids], bos=True, eos=True)
             yield Batch(sent1, sent2)
 
-    def get_iterator(self, shuffle, group_by_size=False):
-        """
-        Return a sentences iterator.
-        """
+
+    def get_batch_ids(self, shuffle, group_by_size=False, num_subsets=None):
         assert type(shuffle) is bool and type(group_by_size) is bool
         assert group_by_size is False or shuffle is True
+        assert num_subsets is None or isinstance(num_subsets, int)
+
+        if num_subsets is not None:
+            assert num_subsets > 1
 
         # sentence lengths
         #lengths = self.lengths1 + self.lengths2 + 2
@@ -245,6 +248,20 @@ class ParallelDataset(Dataset):
         if shuffle:
             np.random.shuffle(batches)
 
+        if num_subsets is not None:
+            subset_batch_num = len(batches) // num_subsets
+            subset_batches = [batches[i*subset_batch_num:(i+1)*subset_batch_num] for i in range(num_subsets)]
+            batches = subset_batches
+
+        return batches
+
+
+    def get_iterator(self, shuffle, group_by_size=False):
+        """
+        Return a sentences iterator.
+        """
+        batches = self.get_batch_ids(shuffle=shuffle, group_by_size=group_by_size)
+
         # return the iterator
         return self.get_batches_iterator(batches)
 
@@ -259,26 +276,12 @@ def get(params=None):
     tgt_sents = read_sents(config.TGT_RAW_TRAIN_PATH)
     assert len(src_sents) == len(tgt_sents)
 
-    if config.multi_gpu == False:
-        train_iter = ParallelDataset(
-                src_sents,
-                tgt_sents,
-                SRC.vocab,
-                TGT.vocab
-                )
-
-    else:
-        assert params is not None
-        num_gpus = int(os.environ['NGPUS'])
-        n_sents = len(src_sents) // num_gpus
-        a = n_sents * params.local_rank
-        b = n_sents * (params.local_rank + 1)
-        train_iter = ParallelDataset(
-                src_sents[a:b],
-                tgt_sents[a:b],
-                SRC.vocab,
-                TGT.vocab
-                )
+    train_iter = ParallelDataset(
+            src_sents,
+            tgt_sents,
+            SRC.vocab,
+            TGT.vocab
+            )
     
     valid_iter = ParallelDataset(
             read_sents(config.SRC_RAW_VALID_PATH),
