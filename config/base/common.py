@@ -19,7 +19,7 @@ class Config:
     MAX_LEN = 250 
     
     # data paths
-    DATA_PATH="/mnt/data/zhaoyuekai/active_NMT/playground/de-en"
+    DATA_PATH="../../data/de-en"
     SRC_RAW_TRAIN_PATH = DATA_PATH + "/iwslt14_de_en/train.de"
     TGT_RAW_TRAIN_PATH = DATA_PATH + "/iwslt14_de_en/train.en"
     SRC_RAW_VALID_PATH = DATA_PATH + "/iwslt14_de_en/valid.de"
@@ -49,7 +49,7 @@ class Config:
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
     epoch_size = 150
-    continue_path = "checkpoints/checkpoint_best_ppl.pth"
+    continue_path = None
     dump_path = "checkpoints/"
     clip_grad_norm = 0.0
     accumulate_gradients = 1
