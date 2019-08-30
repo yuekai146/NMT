@@ -47,10 +47,10 @@ def main():
         if os.path.exists(config.dump_path) == False:
             os.makedirs(config.dump_path)
 
-    # Save config in dump_path
-    f = open(os.path.join(config.dump_path, "config.pkl"), 'wb')
-    pickle.dump(config, f)
-    f.close()
+        # Save config in dump_path
+        f = open(os.path.join(config.dump_path, "config.pkl"), 'wb')
+        pickle.dump(config, f)
+        f.close()
 
     # Create logger for each process
     logger = create_logger(
