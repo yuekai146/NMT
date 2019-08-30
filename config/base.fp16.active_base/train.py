@@ -43,8 +43,9 @@ def main():
     trainer = Enc_Dec_Trainer(params)
 
     # Check whether dump_path exists, if not create one
-    if os.path.exists(config.dump_path) == False:
-        os.makedirs(config.dump_path)
+    if params.local_rank == 0 or config.multi_gpu == False:
+        if os.path.exists(config.dump_path) == False:
+            os.makedirs(config.dump_path)
 
     # Save config in dump_path
     f = open(os.path.join(config.dump_path, "config.pkl"), 'wb')
