@@ -51,6 +51,7 @@ def main():
         f = open(os.path.join(config.dump_path, "config.pkl"), 'wb')
         pickle.dump(config, f)
         f.close()
+    torch.distributed.barrier()
 
     # Create logger for each process
     logger = create_logger(
