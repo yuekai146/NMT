@@ -19,7 +19,7 @@ class Config:
     MAX_LEN = 250 
     
     # data paths
-    DATA_PATH="/mnt/data/zhaoyuekai/active_NMT/playground/de-en"
+    DATA_PATH="../../data/de-en"
     SRC_RAW_TRAIN_PATH = DATA_PATH + "/iwslt14_de_en/train.de"
     TGT_RAW_TRAIN_PATH = DATA_PATH + "/iwslt14_de_en/train.en"
     SRC_RAW_VALID_PATH = DATA_PATH + "/iwslt14_de_en/valid.de"
@@ -38,7 +38,7 @@ class Config:
     max_batch_size = 1000 
 
     # For optimizer
-    opt_warmup = 5000
+    opt_warmup = 4000
     lr = 1e-3
     beta1 = 0.9
     beta2 = 0.98
@@ -47,7 +47,7 @@ class Config:
 
     # For fp16 training
     fp16 = True # Whether to use fp16 training
-    amp = 1 # Level of optimization
+    amp = 2 # Level of optimization
 
     if fp16:
         if src_n_vocab % 8 != 0:

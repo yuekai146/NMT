@@ -9,6 +9,9 @@ https://github.com/glample/fastBPE
 # Fairseq
 https://github.com/pytorch/fairseq
 
+# Apex
+https://github.com/NVIDIA/apex
+
 # Others
 See requirements.txt
 
