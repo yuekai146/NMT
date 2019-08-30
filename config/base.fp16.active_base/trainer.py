@@ -278,6 +278,9 @@ class Trainer(object):
                 self.save_checkpoint('checkpoint_best_%s' % metric_name)
 
     def early_stop(self, scores):
+        if scores is None:
+            return 
+
         if self.stopping_criterion is not None:
             assert self.stopping_criterion in scores
             factor = self.best_metrics[self.stopping_criterion][1]
