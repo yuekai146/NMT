@@ -40,14 +40,18 @@ do
 	# Train network on new labeled dataset
 	export NGPUS=8
 	if [ $i -eq 0 ]; then
-		continue_path=None
+		rlaunch --cpu=16 --memory=32768 --gpu=8 -- python3 -m torch.distributed.launch --nproc_per_node=$NGPUS train.py \
+			--raw_src $prep/train_$((i+1)).$SRC \
+			--raw_tgt $prep/train_$((i+1)).$TGT \
+			--dump_path checkpoints/$((i+1))/
 	else
 		continue_path=checkpoints/$i/checkpoint_best_ppl.pth
+		rlaunch --cpu=16 --memory=32768 --gpu=8 -- python3 -m torch.distributed.launch --nproc_per_node=$NGPUS train.py \
+			--raw_src $prep/train_$((i+1)).$SRC \
+			--raw_tgt $prep/train_$((i+1)).$TGT \
+			--continue_path $continue_path \
+			--dump_path checkpoints/$((i+1))/
 	fi
-	rlaunch --cpu=16 --memory=32768 --gpu=8 -- python3 -m torch.distributed.launch --nproc_per_node=$NGPUS train.py --raw_src $prep/train_$((i+1)).$SRC \
-		--raw_tgt $prep/train_$((i+1)).$TGT \
-		--continue_path $continue_path \
-		--dump_path checkpoints/$((i+1))/
 	rm -rf checkpoints/$((i+1))/checkpoint_?.pth
 	rm -rf checkpoints/$((i+1))/checkpoint_??.pth
 	rm -rf checkpoints/$((i+1))/checkpoint_???.pth

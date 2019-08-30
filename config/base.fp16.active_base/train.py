@@ -13,10 +13,10 @@ def main():
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="Multi-GPU - Local rank"
             )
-    parser.add_argument("--raw_src", type=str, default=None
+    parser.add_argument("--raw_src", type=str, default=None,
             help="Tokenized source train file"
             )
-    parser.add_argument("--raw_tgt", type=str, default=None
+    parser.add_argument("--raw_tgt", type=str, default=None,
             help="Tokenized target train file"
             )
     parser.add_argument("--continue_path", type=str, default=None,
@@ -27,14 +27,14 @@ def main():
             )
     params = parser.parse_args()
 
-    if args.raw_src is not None:
-        config.SRC_RAW_TRAIN_PATH = args.raw_src
-    if args.raw_tgt is not None:
-        config.TGT_RAW_TRAIN_PATH = args.raw_tgt
-    if args.continue_path is not None:
-        config.continue_path = args.continue_path
-    if args.dump_path is not None:
-        config.dump_path = args.dump_path
+    if params.raw_src is not None:
+        config.SRC_RAW_TRAIN_PATH = params.raw_src
+    if params.raw_tgt is not None:
+        config.TGT_RAW_TRAIN_PATH = params.raw_tgt
+    if params.continue_path is not None:
+        config.continue_path = params.continue_path
+    if params.dump_path is not None:
+        config.dump_path = params.dump_path
 
     # Initialize distributed training
     if params.local_rank != -1:
