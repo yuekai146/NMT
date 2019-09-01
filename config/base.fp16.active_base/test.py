@@ -29,9 +29,14 @@ def test_model_numel():
     print(n)
 
 
+def test_early_stop():
+    exit()
+
+
 def test():
     #test_mask()
-    test_model_numel()
+    #test_model_numel()
+    test_early_stop()
 
 
 if __name__ == "__main__":
