@@ -103,7 +103,7 @@ def main():
         scores = trainer.valid_step()
         trainer.save_best_model(scores)
         trainer.save_periodic()
-        trainer.end_epoch()
+        trainer.end_epoch(scores)
         torch.distributed.barrier()
 
 

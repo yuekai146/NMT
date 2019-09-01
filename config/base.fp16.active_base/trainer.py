@@ -77,9 +77,20 @@ class Trainer(object):
         for k in config.valid_metrics.keys():
             factor = config.valid_metrics[k]
             self.best_metrics[k] = [config.init_metric * factor, factor]
+
+        # early stopping metrics
+        self.early_stopping_metrics = {}
+        for k in self.best_metrics:
+            self.early_stopping_metrics[k] = self.best_metrics[k]
+
         self.decrease_counts = 0
         self.decrease_counts_max = config.decrease_counts_max
         self.stopping_criterion = config.stopping_criterion
+        if config.multi_gpu:
+            self.should_terminate = torch.tensor(0).byte()
+            self.should_terminate = self.should_terminate.cuda()
+        else:
+            self.should_terminate = False
         assert ( self.stopping_criterion in self.best_metrics ) or ( self.stopping_criterion is None )
 
         # training statistics
@@ -200,7 +211,8 @@ class Trainer(object):
         ckpt = {
             'epoch': self.epoch,
             'n_total_iter': self.n_total_iter,
-            'best_metrics': self.best_metrics
+            'best_metrics': self.best_metrics,
+            'early_stopping_metrics': self.early_stopping_metrics
         }
 
         logger.warning(f"Saving network parameters ...")
@@ -244,6 +256,7 @@ class Trainer(object):
                 self.epoch = ckpt['epoch'] + 1
                 self.n_total_iter = ckpt['n_total_iter']
                 self.best_metrics = ckpt['best_metrics']
+                self.early_stopping_metrics = ckpt['early_stopping_metrics']
             
             logger.warning(f"Checkpoint reloaded. Resuming at epoch {self.epoch} / iteration {self.n_total_iter} ...")
 
@@ -277,25 +290,47 @@ class Trainer(object):
                 logger.info('New best score for %s: %.6f' % (metric_name, scores[metric_name]))
                 self.save_checkpoint('checkpoint_best_%s' % metric_name)
 
+    
     def early_stop(self, scores):
-        if scores is None:
-            return 
+        assert isinstance(scores, dict)
 
-        if self.stopping_criterion is not None:
-            assert self.stopping_criterion in scores
-            factor = self.best_metrics[self.stopping_criterion][1]
-            val = self.best_metrics[self.stopping_criterion][0]
-            if factor * scores[self.stopping_criterion] > factor * val:
-                self.decrease_counts = 0
-            else:
-                self.decrease_counts += 1
-            
-            if self.decrease_counts >= self.decrease_counts_max:
-                exit()
+        if self.params.local_rank == 0: 
+            if self.stopping_criterion is not None:
+                assert self.stopping_criterion in scores
+                factor = self.early_stopping_metrics[self.stopping_criterion][1]
+                val = self.early_stopping_metrics[self.stopping_criterion][0]
+
+                print("New score is {}".format(factor * scores[self.stopping_criterion]))
+                print("Old score is {}".format(factor * val))
+                if factor * scores[self.stopping_criterion] > factor * val:
+                    self.decrease_counts = 0
+                    self.early_stopping_metrics[self.stopping_criterion][0] = scores[self.stopping_criterion]
+                else:
+                    self.decrease_counts += 1
+                
+                if self.decrease_counts >= self.decrease_counts_max:
+                    if config.multi_gpu:
+                        self.should_terminate.data = torch.tensor(1).byte().cuda()
+                    else:
+                        self.should_terminate = True
+                
+        torch.distributed.broadcast(
+                tensor=self.should_terminate, src=0
+                )
+
 
     def end_epoch(self, scores=None):
-        if self.params.local_rank == 0:
-            self.early_stop(scores) 
+       
+        self.early_stop(scores) 
+        print("Process {}, should terminate: {}".format(self.params.local_rank, self.should_terminate.item()))
+        
+        if config.multi_gpu:
+            if self.should_terminate.item() == True:
+                exit()
+        else:
+            if self.should_terminate == True:
+                exit()
+
         self.epoch += 1
 
 
@@ -351,8 +386,6 @@ class Enc_Dec_Trainer(Trainer):
         """
         Evaluate perplexity and next word prediction accuracy.
         """
-        if self.params.local_rank != 0:
-            return
 
         self.net.eval()
         self.criterion.eval()
