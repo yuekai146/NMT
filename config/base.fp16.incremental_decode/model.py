@@ -11,6 +11,9 @@ import itertools
 from common import config
 
 
+NEW_ID = itertools.count()
+
+
 class Encoder_Decoder(nn.Module):
 
     def __init__(self, encoder, decoder, src_emb, tgt_emb, generator):
@@ -154,17 +157,18 @@ def attention(query, key, value, mask=None, dropout=None):
 
     if dropout is not None:
         attn_score = dropout(attn_score)
+    #print("attn_score", attn_score.size())
+    #print("value", value.size())
 
     return torch.matmul(attn_score, value), attn_score
 
 
 class Multi_Head_Attention(nn.Module):
-    NEW_ID = itertools.count()
 
     def __init__(self, d_model, h, dropout=0.1):
         super(Multi_Head_Attention, self).__init__()
         assert d_model % h == 0
-        self.layer_id = next(self.NEW_ID)
+        self.layer_id = None
         self.d_model = d_model
         self.h = h
         self.d_k = d_model // h
@@ -186,7 +190,7 @@ class Multi_Head_Attention(nn.Module):
         def unshape(x):
             return x.transpose(1, 2).contiguous().view(n_batches, -1, self.d_model)
 
-        query = shape(self.q_lin(query))  # bsz, qlen, h, d_k
+        q = shape(self.q_lin(query))  # bsz, qlen, h, d_k
         
         assert (key is None and value is None) or (key is not None and value is not None)
 
@@ -200,23 +204,30 @@ class Multi_Head_Attention(nn.Module):
         else:
             if key is None:
                 if self.layer_id in cache:
+                    #print("In cache")
                     # Inference time self attention, cache been initialized
                     k, v = cache[self.layer_id]
                     key, value = shape(self.k_lin(query)), shape(self.v_lin(query))
-                    key, value = torch.cat([k, key], dim=1), torch.cat([v, value], dim=1)
+                    key, value = torch.cat([k, key], dim=2), torch.cat([v, value], dim=2)
                 else:
+                    #print("Not in cache")
                     # Inference time self attention, cache needs to be initialized
                     key, value = shape(self.k_lin(query)), shape(self.v_lin(query))
             else:
                 if self.layer_id in cache:
+                    #print("In cache")
                     # Inference time src attention, cache been initiailized
                     key, value = cache[self.layer_id]
                 else:
+                    #print("Not in cache")
                     # Inference time src attention, cache needs to be initialized
                     key, value = shape(self.k_lin(key)), shape(self.v_lin(value))
-            self.cache[self.layer_id] = (key, value)
+            #print("Key size {}".format(key.size()))
+            #print("Value size {}".format(value.size()))
+            #print("Query size {}".format(query.size()))
+            cache[self.layer_id] = (key, value)
 
-        output, self.attn = attention(query, key, value, mask, self.dropout)
+        output, self.attn = attention(q, key, value, mask, self.dropout)
         output = unshape(output)
 
         return self.out_lin(output)
@@ -337,6 +348,11 @@ def get():
     for p in net.parameters():
         if p.dim() > 1:
             nn.init.xavier_uniform_(p)
+    
+    for name, module in net.named_modules():
+        if name.endswith("attn"):
+            assert module.layer_id is None
+            module.layer_id = next(NEW_ID)
 
     criterion = Label_Smoothing_Loss(config.label_smoothing)
 
@@ -349,7 +365,7 @@ def get():
 if __name__ == "__main__":
     net, criterion = get()
     batch = dummpy_input()
-
+    
     for i in range(1000):
         logits = net(**batch)
         loss, nll_loss = criterion(logits, batch['tgt'], batch['tgt_mask'].squeeze())

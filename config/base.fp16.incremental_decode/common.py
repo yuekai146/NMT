@@ -34,7 +34,7 @@ class Config:
     SRC_LAN = "de"
     TGT_LAN = "en"
     BATCH_SIZE = 128
-    tokens_per_batch = 5000 # if tokens_per_batch > 0, ignore BATCH_SIZE
+    tokens_per_batch = 3600 # if tokens_per_batch > 0, ignore BATCH_SIZE
     max_batch_size = 1000 
 
     # For optimizer
@@ -46,8 +46,8 @@ class Config:
     opt_eps = 1e-9
 
     # For fp16 training
-    fp16 = True # Whether to use fp16 training
-    amp = 2 # Level of optimization
+    fp16 = False # Whether to use fp16 training
+    amp = -1 # Level of optimization
 
     if fp16:
         if src_n_vocab % 8 != 0:
