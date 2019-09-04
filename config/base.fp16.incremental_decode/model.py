@@ -32,16 +32,22 @@ class Encoder_Decoder(nn.Module):
             assert len(emb_params) == 1
             self.generator.proj.weight = emb_params[0]
 
-    def forward(self, src, src_mask, tgt, tgt_mask):
+    def forward(self, src, src_mask, tgt, tgt_mask, log_prob=True):
         return self.generator(
-                self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask)
+                self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask),
+                log_prob=log_prob
                 )
 
     def encode(self, src, src_mask):
         return self.encoder(self.src_emb(src), src_mask)
 
-    def decode(self, memory, src_mask, tgt, tgt_mask):
-        return self.decoder(self.tgt_emb(tgt), memory, src_mask, tgt_mask)
+    def decode(self, memory, src_mask, tgt, tgt_mask, cache=None):
+        if cache is not None and 'cur_len' in cache:
+            x = self.tgt_emb[0](tgt)
+            x = self.tgt_emb[1](x, cache['cur_len'])
+            return self.decoder(x, memory, src_mask, tgt_mask, cache)
+        else:
+            return self.decoder(self.tgt_emb(tgt), memory, src_mask, tgt_mask, cache)
 
 
 class Generator(nn.Module):
@@ -50,8 +56,11 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         self.proj = nn.Linear(d_model, n_vocab)
 
-    def forward(self, x):
-        return F.log_softmax(self.proj(x), dim=-1)
+    def forward(self, x, log_prob=True):
+        if log_prob:
+            return F.log_softmax(self.proj(x), dim=-1)
+        else:
+            return self.proj(x)
 
 
 def clone(module, N):
@@ -149,16 +158,15 @@ class Decoder_Layer(nn.Module):
 
 def attention(query, key, value, mask=None, dropout=None):
     d_k = query.size(-1)
-    attn_score = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+    query = query / math.sqrt(d_k)
+    attn_score = torch.matmul(query, key.transpose(-2, -1))
     
     if mask is not None:
         attn_score = attn_score.masked_fill(mask == 0, -float('inf'))
-    attn_score = F.softmax(attn_score, dim=-1)
+    attn_score = F.softmax(attn_score.float(), dim=-1).type_as(attn_score)
 
     if dropout is not None:
         attn_score = dropout(attn_score)
-    #print("attn_score", attn_score.size())
-    #print("value", value.size())
 
     return torch.matmul(attn_score, value), attn_score
 
@@ -194,14 +202,7 @@ class Multi_Head_Attention(nn.Module):
         
         assert (key is None and value is None) or (key is not None and value is not None)
 
-        if cache is None:
-            if key is None:
-                # Training time self attention
-                key, value = shape(self.k_lin(query)), shape(self.v_lin(query))
-            else:
-                # Training time src attention
-                key, value = shape(self.k_lin(key)), shape(self.v_lin(value))
-        else:
+        if cache is not None:
             if key is None:
                 if self.layer_id in cache:
                     #print("In cache")
@@ -226,8 +227,16 @@ class Multi_Head_Attention(nn.Module):
             #print("Value size {}".format(value.size()))
             #print("Query size {}".format(query.size()))
             cache[self.layer_id] = (key, value)
-
-        output, self.attn = attention(q, key, value, mask, self.dropout)
+            output, self.attn = attention(q, key, value, mask, self.dropout)
+        else:
+            if key is None:
+                # Training time self attention
+                key, value = shape(self.k_lin(query)), shape(self.v_lin(query))
+            else:
+                # Training time src attention
+                key, value = shape(self.k_lin(key)), shape(self.v_lin(value))
+                
+            output, self.attn = attention(q, key, value, mask, self.dropout)
         output = unshape(output)
 
         return self.out_lin(output)
@@ -270,8 +279,8 @@ class Positional_Embeddings(nn.Module):
         pe = pe.unsqueeze(0)
         self.register_buffer('pe', pe)
 
-    def forward(self, x):
-        x = x + Variable(self.pe[:, :x.size(1)], requires_grad=False)
+    def forward(self, x, start=0):
+        x = x + Variable(self.pe[:, start:start+x.size(1)], requires_grad=False)
         return self.dropout(x)
 
 

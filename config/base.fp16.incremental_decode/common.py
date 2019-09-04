@@ -46,8 +46,8 @@ class Config:
     opt_eps = 1e-9
 
     # For fp16 training
-    fp16 = False # Whether to use fp16 training
-    amp = -1 # Level of optimization
+    fp16 = True # Whether to use fp16 training
+    amp = 2 # Level of optimization
 
     if fp16:
         if src_n_vocab % 8 != 0:

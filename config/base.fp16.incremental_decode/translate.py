@@ -22,43 +22,44 @@ def greedy(args, net, src, src_mask, src_vocab, tgt_vocab):
     with torch.no_grad():
         bsz = src.size(0)
         enc_out = net.encode(src=src, src_mask=src_mask)
-        generated = src.new(max_len, bsz)
+        generated = src.new(bsz, max_len)
         generated.fill_(tgt_vocab.stoi[config.PAD])
-        generated[0].fill_(tgt_vocab.stoi[config.BOS])
-
+        generated[:, 0].fill_(tgt_vocab.stoi[config.BOS])
+        generated = generated.long()
+        
         cur_len = 1
-        gen_len = src.new_ones(bsz)
-        unfinished_sents = src.new_ones(bsz)
+        gen_len = src.new_ones(bsz).long()
+        unfinished_sents = src.new_ones(bsz).long()
 
-        cache = {}
+        cache = {'cur_len':cur_len - 1}
 
         while cur_len < max_len:
             x = generated[:, cur_len - 1].unsqueeze(-1)
-            tgt_mask = ( generated[:, cur_len - 1] != tgt_vocab.stoi[config.PAD] ).unsqueeze(-2)
+            tgt_mask = ( generated[:, :cur_len] != tgt_vocab.stoi[config.PAD] ).unsqueeze(-2)
             tgt_mask = tgt_mask & Variable(
                     subsequent_mask(cur_len).type_as(tgt_mask.data)
                     )
 
-            if args.use_cuda:
-                tgt_mask = tgt_mask.cuda()
-            logit = net.decoder(
-                    net.tgt_emb(x), enc_out, src_mask,
-                    tgt_mask[:, -1, :].unsqueeze(-2), cache
+            logit = net.decode(
+                    enc_out, src_mask, x,
+                    tgt_mask[:, cur_len-1, :].unsqueeze(-2), cache
                     )
             scores = net.generator(logit).exp().squeeze()
-            next_words = torch.topk(logits, 1)[1].squeeze()
+            
+            next_words = torch.topk(scores, 1)[1].squeeze()
 
-            assert next_words.size()  == (bs,)
+            assert next_words.size()  == (bsz,)
             generated[:, cur_len] = next_words * unfinished_sents + tgt_vocab.stoi[config.PAD] * (1 - unfinished_sents)
             gen_len.add_(unfinished_sents)
             unfinished_sents.mul_(next_words.ne(tgt_vocab.stoi[config.EOS]).long())
             cur_len = cur_len + 1
+            cache['cur_len'] = cur_len - 1
 
             if unfinished_sents.max() == 0:
                 break
 
         if cur_len == max_len:
-            generated[:, -1].masked_fill_(unfinished_sents.byte(), tgt_vocab.stoi[config.EOS])
+            generated[:, -1].masked_fill_(unfinished_sents.bool(), tgt_vocab.stoi[config.EOS])
 
         return generated[:cur_len], gen_len
 
@@ -103,13 +104,19 @@ def translate_sentence(sentence, net, args, src_vocab, tgt_vocab):
     return sentence
 
 
-def gen_batch2str(generated, gen_len, tgt_vocab):
+def gen_batch2str(src, generated, gen_len, src_vocab, tgt_vocab):
     generated = generated.cpu().numpy().tolist()
     gen_len = gen_len.cpu().numpy().tolist()
+    src = src.cpu().numpy().tolist()
     translated = []
     for i, l in enumerate(generated):
         l = l[:gen_len[i]]
-        translated.append(remove_special_tok(remove_bpe(" ".join(tgt_vocab.stoi[tok] for tok in l))))
+        sys_sent = " ".join([tgt_vocab.itos[tok] for tok in l])
+        src_sent = " ".join([src_vocab.itos[tok] for tok in src[i]])
+        sys_sent = remove_special_tok(remove_bpe(sys_sent))
+        src_sent = remove_special_tok(remove_bpe(src_sent))
+        translated.append("S: " + src_sent)
+        translated.append("H: " + sys_sent)
     return translated
 
 
@@ -119,7 +126,7 @@ def translate(args, net, src_vocab, tgt_vocab):
     translated = []
 
     if args.greedy:
-        src_dataset = Dataset(sentences, src_vocab)
+        src_dataset = Dataset(args.text, src_vocab)
         if args.batch_size is not None:
             src_dataset.BATCH_SIZE = args.batch_size
         if args.max_batch_size is not None:
@@ -130,8 +137,12 @@ def translate(args, net, src_vocab, tgt_vocab):
         src_dataiter = iter(src_dataset.get_iterator(True, True))
         for src in src_dataiter:
             src_mask = (src != src_vocab.stoi[config.PAD]).unsqueeze(-2)
+            if args.use_cuda:
+                src, src_mask = src.cuda(), src_mask.cuda()
             generated, gen_len = greedy(args, net, src, src_mask, src_vocab, tgt_vocab)
-            translated.extend(gen_batch2str(generated, gen_len, tgt_vocab))
+            translated.extend(gen_batch2str(src, generated, gen_len, src_vocab, tgt_vocab))
+            for res_sent in translated:
+                print(res_sent)
     else:
         for i_s, sentence in enumerate(sentences):
             s_trans = translate_sentence(sentence, net, args, src_vocab, tgt_vocab)
@@ -156,6 +167,7 @@ def main():
     parser.add_argument('--batch_size', type=int, default=None)
     parser.add_argument('--max_batch_size', type=int, default=None)
     parser.add_argument('--tokens_per_batch', type=int, default=None)
+    parser.add_argument('--greedy', action='store_true')
 
     args = parser.parse_args()
     args.use_cuda = ( args.no_cuda == False) and torch.cuda.is_available()
