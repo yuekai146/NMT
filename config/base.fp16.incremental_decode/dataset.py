@@ -148,6 +148,7 @@ class Dataset(object):
 
         # sanity checks
         assert self.lengths[indices].sum() == sum([self.lengths[x].sum() for x in batches])
+        print(sum([len(bs) for bs in batches]))
 
         # return the iterator
         return self.get_batches_iterator(batches, bos, eos)

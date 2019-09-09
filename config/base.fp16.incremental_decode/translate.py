@@ -11,7 +11,7 @@ import model
 from beam import beam_search
 from common import config
 from utils import remove_bpe, remove_special_tok, subsequent_mask
-from dataset import Dataset
+from dataset import ParallelDataset
 
 
 def greedy(args, net, src, src_mask, src_vocab, tgt_vocab):
@@ -61,7 +61,7 @@ def greedy(args, net, src, src_mask, src_vocab, tgt_vocab):
         if cur_len == max_len:
             generated[:, -1].masked_fill_(unfinished_sents.bool(), tgt_vocab.stoi[config.EOS])
 
-        return generated[:cur_len], gen_len
+        return generated[:, :cur_len], gen_len
 
 
 def load_model(checkpoint_path, net):
@@ -104,18 +104,22 @@ def translate_sentence(sentence, net, args, src_vocab, tgt_vocab):
     return sentence
 
 
-def gen_batch2str(src, generated, gen_len, src_vocab, tgt_vocab):
+def gen_batch2str(src, tgt, generated, gen_len, src_vocab, tgt_vocab):
     generated = generated.cpu().numpy().tolist()
     gen_len = gen_len.cpu().numpy().tolist()
     src = src.cpu().numpy().tolist()
+    tgt = tgt.cpu().numpy().tolist()
     translated = []
     for i, l in enumerate(generated):
         l = l[:gen_len[i]]
         sys_sent = " ".join([tgt_vocab.itos[tok] for tok in l])
         src_sent = " ".join([src_vocab.itos[tok] for tok in src[i]])
+        ref_sent = " ".join([tgt_vocab.itos[tok] for tok in tgt[i]])
         sys_sent = remove_special_tok(remove_bpe(sys_sent))
         src_sent = remove_special_tok(remove_bpe(src_sent))
+        ref_sent = remove_special_tok(remove_bpe(ref_sent))
         translated.append("S: " + src_sent)
+        translated.append("T: " + ref_sent)
         translated.append("H: " + sys_sent)
     return translated
 
@@ -126,23 +130,25 @@ def translate(args, net, src_vocab, tgt_vocab):
     translated = []
 
     if args.greedy:
-        src_dataset = Dataset(args.text, src_vocab)
+        infer_dataset = ParallelDataset(args.text, args.ref_text, src_vocab, tgt_vocab)
         if args.batch_size is not None:
-            src_dataset.BATCH_SIZE = args.batch_size
+            infer_dataset.BATCH_SIZE = args.batch_size
         if args.max_batch_size is not None:
-            src_dataset.max_batch_size = args.max_batch_size
+            infer_dataset.max_batch_size = args.max_batch_size
         if args.tokens_per_batch is not None:
-            src_dataset.tokens_per_batch = args.tokens_per_batch
+            infer_dataset.tokens_per_batch = args.tokens_per_batch
 
-        src_dataiter = iter(src_dataset.get_iterator(True, True))
-        for src in src_dataiter:
-            src_mask = (src != src_vocab.stoi[config.PAD]).unsqueeze(-2)
+        infer_dataiter = iter(infer_dataset.get_iterator(True, True))
+        num_sents = 0
+        for raw_batch in infer_dataiter:
+            src_mask = (raw_batch.src != src_vocab.stoi[config.PAD]).unsqueeze(-2)
             if args.use_cuda:
-                src, src_mask = src.cuda(), src_mask.cuda()
+                src, src_mask = raw_batch.src.cuda(), src_mask.cuda()
             generated, gen_len = greedy(args, net, src, src_mask, src_vocab, tgt_vocab)
-            translated.extend(gen_batch2str(src, generated, gen_len, src_vocab, tgt_vocab))
-            for res_sent in translated:
+            new_translations = gen_batch2str(src, raw_batch.tgt, generated, gen_len, src_vocab, tgt_vocab)
+            for res_sent in new_translations:
                 print(res_sent)
+            translated.extend(new_translations)
     else:
         for i_s, sentence in enumerate(sentences):
             s_trans = translate_sentence(sentence, net, args, src_vocab, tgt_vocab)
@@ -163,6 +169,7 @@ def main():
     parser.add_argument('-max_ratio', type=int, default=1.5)
     parser.add_argument('-no_cuda', action='store_true')
     parser.add_argument('-text', type=str, required=True)
+    parser.add_argument('-ref_text', type=str, required=True)
     parser.add_argument('-lp', '--length_penalty', type=float, default=0.7)
     parser.add_argument('--batch_size', type=int, default=None)
     parser.add_argument('--max_batch_size', type=int, default=None)
@@ -170,7 +177,7 @@ def main():
     parser.add_argument('--greedy', action='store_true')
 
     args = parser.parse_args()
-    args.use_cuda = ( args.no_cuda == False) and torch.cuda.is_available()
+    args.use_cuda = ( args.no_cuda == False ) and torch.cuda.is_available()
 
     assert args.k > 0
     assert args.max_len > 10
@@ -184,6 +191,12 @@ def main():
     fpath = args.text
     try:
         args.text = open(fpath, encoding='utf-8').read().split('\n')[:-1]
+    except:
+        print("error opening or reading text file")
+    
+    fpath = args.ref_text
+    try:
+        args.ref_text = open(fpath, encoding='utf-8').read().split('\n')[:-1]
     except:
         print("error opening or reading text file")
     
