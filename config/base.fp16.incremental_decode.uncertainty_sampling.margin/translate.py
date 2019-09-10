@@ -30,7 +30,6 @@ def greedy(args, net, src, src_mask, src_vocab, tgt_vocab):
         cur_len = 1
         gen_len = src.new_ones(bsz).long()
         unfinished_sents = src.new_ones(bsz).long()
-        useless = src.new_zeros(bsz, max_len)
 
         cache = {'cur_len':cur_len - 1}
 
@@ -47,7 +46,6 @@ def greedy(args, net, src, src_mask, src_vocab, tgt_vocab):
                     )
             scores = net.generator(logit).exp().squeeze()
             
-            useless[:, cur_len-1] = scores.sum(-1)
             next_words = torch.topk(scores, 1)[1].squeeze()
 
             assert next_words.size()  == (bsz,)
@@ -148,12 +146,9 @@ def translate(args, net, src_vocab, tgt_vocab):
                 src, src_mask = raw_batch.src.cuda(), src_mask.cuda()
             generated, gen_len = greedy(args, net, src, src_mask, src_vocab, tgt_vocab)
             new_translations = gen_batch2str(src, raw_batch.tgt, generated, gen_len, src_vocab, tgt_vocab)
-            print('src size : {}'.format(src.size()))
-            '''
             for res_sent in new_translations:
                 print(res_sent)
             translated.extend(new_translations)
-            '''
     else:
         for i_s, sentence in enumerate(sentences):
             s_trans = translate_sentence(sentence, net, args, src_vocab, tgt_vocab)
