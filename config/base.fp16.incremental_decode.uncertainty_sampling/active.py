@@ -71,13 +71,13 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
                 q_scores = q_scores[:, 0] - q_scores[:, 1]
             elif active_func == "te" or active_func == "tte":
                 q_scores = -torch.distributions.categorical.Categorical(probs=scores).entropy()
-            assert q_scores.size() == (bsz,)
+            q_scores = q_scores.view(bsz)
             
             query_scores = query_scores + unfinished_sents.float() * q_scores
             
             next_words = torch.topk(scores, 1)[1].squeeze()
 
-            assert next_words.size()  == (bsz,)
+            next_words = next_words.view(bsz)
             generated[:, cur_len] = next_words * unfinished_sents + tgt_vocab.stoi[config.PAD] * (1 - unfinished_sents)
             gen_len.add_(unfinished_sents)
             unfinished_sents.mul_(next_words.ne(tgt_vocab.stoi[config.EOS]).long())

@@ -11,3 +11,4 @@ config/*/results
 config/*/data_bin
 config/*/active_data
 config/*/*.txt
+data/*

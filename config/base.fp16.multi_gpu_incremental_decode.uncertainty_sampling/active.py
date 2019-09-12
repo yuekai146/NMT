@@ -5,6 +5,7 @@ import argparse
 import model
 import numpy as np
 import os
+import random
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -58,7 +59,7 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
                     enc_out, src_mask, x,
                     tgt_mask[:, cur_len-1, :].unsqueeze(-2), cache
                     )
-            scores = net.generator(logit).exp().squeeze().data
+            scores = net.generator(logit).exp().view(bsz, -1).data
             
             # Calculate activation function value
             # The smaller query score is, the more uncertain model is about the sentence
@@ -70,12 +71,14 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
                 q_scores = q_scores[:, 0] - q_scores[:, 1]
             elif active_func == "te" or active_func == "tte":
                 q_scores = -torch.distributions.categorical.Categorical(probs=scores).entropy()
-            assert q_scores.size() == (bsz,)
+            q_scores = q_scores.view(bsz)
+            assert q_scores.size() == (bsz,), q_scores
             
             query_scores = query_scores + unfinished_sents.float() * q_scores
             
             next_words = torch.topk(scores, 1)[1].squeeze()
 
+            next_words = next_words.view(bsz)
             assert next_words.size()  == (bsz,)
             generated[:, cur_len] = next_words * unfinished_sents + tgt_vocab.stoi[config.PAD] * (1 - unfinished_sents)
             gen_len.add_(unfinished_sents)
@@ -85,12 +88,15 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
 
             if unfinished_sents.max() == 0:
                 break
+
+        '''
         if cur_len == max_len:
             generated[:, -1].masked_fill_(unfinished_sents.bool(), tgt_vocab.stoi[config.EOS])
         
         translated = gen_batch2str(src, generated[:, :cur_len], gen_len, src_vocab, tgt_vocab)
         for new_sent in translated:
             print(new_sent)
+        '''
 
         if average_by_length:
             query_scores = query_scores / gen_len.float()
@@ -102,7 +108,7 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
     return result
 
 
-def split_batch(src, indices, max_batch_size=1000):
+def split_batch(src, indices, max_batch_size=800):
     bsz = src.size(0)
     if bsz <= max_batch_size:
         splited = False
@@ -201,22 +207,6 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
     include = indices[include]
     return [unlabeled_dataset[idx] for idx in include], include
     '''
-
-
-def label_queries(queries, oracle):
-    assert isinstance(queries, np.ndarray)
-    queries = queries.astype('int').tolist()
-    return [oracle[idx] for idx in queries]
-
-
-def change_datasets(unlabeled_dataset, labeled_dataset, labeled_queries, query_indices):
-    assert len(labeled_queries[0]) == len(query_indices)
-    assert len(labeled_queries[1]) == len(labeled_queries[1])
-    unlabeled_dataset = [unlabeled_dataset[idx] for idx in range(len(unlabeled_dataset)) if idx not in query_indices]
-    labeled_dataset[0].extend(labeled_queries[0])
-    labeled_dataset[1].extend(labeled_queries[1])
-
-    return unlabeled_dataset, labeled_dataset
 
 
 def main():
@@ -343,16 +333,35 @@ def main():
         f = open(args.active_out, "r")
         active_out = f.read().split("\n")[:-1]
 
-        # Label instances
-        labeled_queries = [queries]
-        labeled_queries.append( label_queries(query_indices, oracle) )
+        # Sort active_out
+        assert len(active_out) % 4 == 0
+        assert len(active_out) / 4 == len(oracle)
+        active_out = [[active_out[i], active_out[i+1], float(active_out[i+2].split(' ')[-1]), active_out[i+3]] for i in range(0, len(active_out), 4)]
+        active_out = sorted(active_out, key=lambda item: item[2])
 
         # Change datasets
-        unlabeled_dataset, labeled_dataset = change_datasets(
-                unlabeled_dataset, labeled_dataset, labeled_queries, query_indices
-                )
+        indices = np.arange(len(active_out))
+        lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S: "):])).split(' ')) for item in active_out])
+        include = np.cumsum(lengths) <= args.tok_budget
+        not_include = (1 - include).astype('bool')
+        include = indices[include]
+        not_include = indices[not_include]
         
-        oracle = [oracle[idx] for idx in range(len(oracle)) if idx not in query_indices]
+        for idx in include:
+            labeled_dataset[0].append(active_out[idx][0][len("S: "):])
+            labeled_dataset[1].append(active_out[idx][1][len("T: "):])
+        
+        unlabeled_dataset = []
+        oracle = []
+        for idx in not_include:
+            unlabeled_dataset.append(active_out[idx][0][len("S: "):])
+            oracle.append(active_out[idx][1][len("T: "):])
+
+        combined = list(zip(unlabeled_dataset, oracle))
+        random.shuffle(combined)
+
+        unlabeled_dataset[:], oracle[:] = zip(*combined)
+        
         # Store new labeled, unlabeled, oracle dataset
         f = open(args.output_unlabeled_dataset, 'w')
         f.write("\n".join(unlabeled_dataset) + "\n")
