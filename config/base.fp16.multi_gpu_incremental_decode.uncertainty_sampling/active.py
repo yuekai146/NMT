@@ -32,7 +32,6 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
     max_len = args.max_len
     average_by_length = (active_func != "tte")
     result = []
-    print("src size :{}".format(src.size()))
     with torch.no_grad():
         bsz = src.size(0)
         enc_out = net.encode(src=src, src_mask=src_mask)
@@ -86,7 +85,6 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
 
             if unfinished_sents.max() == 0:
                 break
-        
         if cur_len == max_len:
             generated[:, -1].masked_fill_(unfinished_sents.bool(), tgt_vocab.stoi[config.EOS])
         
@@ -99,13 +97,12 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
         query_scores = query_scores.cpu().numpy().tolist()
         indices = indices.tolist()
         assert len(query_scores) == len(indices)
-        print("Indices lengths is {}".format(len(indices)))
         for q_s, idx in zip(query_scores, indices):
             result.append((q_s, idx))
     return result
 
 
-def split_batch(src, indices, max_batch_size=800):
+def split_batch(src, indices, max_batch_size=1000):
     bsz = src.size(0)
     if bsz <= max_batch_size:
         splited = False
@@ -145,18 +142,14 @@ def get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab):
     return results
 
 
-def query_instances(args, unlabeled_dataset, active_func="random", tok_budget=None):
+def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
     # lc stands for least confident
     # te stands for token entropy
     # tte stands for total token entropy
     assert active_func in ["random", "longest", "shortest", "lc", "margin", "te", "tte"]
-    assert isinstance(tok_budget, int)
 
     # lengths represents number of tokens, so BPE should be removed
     lengths = np.array([len(remove_special_tok(remove_bpe(s)).split()) for s in unlabeled_dataset])
-    total_num = sum(lengths)
-    if total_num < tok_budget:
-        tok_budget = total_num
     
     # Preparations before querying instances
     if active_func in ["lc", "margin", "te", "tte"]:
@@ -197,9 +190,17 @@ def query_instances(args, unlabeled_dataset, active_func="random", tok_budget=No
         indices = [item[1] for item in result]
         indices = np.array(indices).astype('int')
 
+        for idx in range(len(result)):
+            print("S: ", unlabeled_dataset[result[idx][1]])
+            print("T: ", oracle[result[idx][1]])
+            print("V: ", result[idx][0])
+            print("I: ", args.input, args.reference, result[idx][1])
+
+    '''
     include = np.cumsum(lengths[indices]) <= tok_budget
     include = indices[include]
     return [unlabeled_dataset[idx] for idx in include], include
+    '''
 
 
 def label_queries(queries, oracle):
@@ -220,115 +221,155 @@ def change_datasets(unlabeled_dataset, labeled_dataset, labeled_queries, query_i
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    subparsers = parser.add_subparsers(help='two modes, score or modify')
+    
+    # Add argument for score mode
+    parser_score = subparsers.add_parser(
+            'score', help='Get active function scores for each unlabeled sentence'
+            )
+    parser_score.add_argument(
+            "-a", "--active_func", type=str,
+            help="Active query function type", required=True
+            )
+    parser_score.add_argument(
+            "-i", "--input", type=str,
+            help="where to read unlabeled data"
+            )
+    parser_score.add_argument(
+            "-ref", "--reference", type=str,
+            help="where to read oracle data"
+            )
+    parser_score.add_argument(
+            '-ckpt', '--checkpoint', type=str,
+            help="Checkpoint path to reload network parameters"
+            )
+    parser_score.add_argument(
+            '-max_len', type=int, default=250,
+            help="Maximum length for generating translations"
+            )
+    parser_score.add_argument(
+            '-no_cuda', action="store_true",
+            help="Use cpu to do translation"
+            )
+    parser_score.add_argument(
+            '--batch_size', type=int, default=None,
+            help="Batch size for generating translations"
+            )
+    parser_score.add_argument(
+            '--max_batch_size', type=int, default=None,
+            help="Maximum batch size if tokens_per_batch is not None"
+            )
+    parser_score.add_argument(
+            '--tokens_per_batch', type=int, default=None,
+            help="Maximum number of tokens in a batch when generating translations"
+            )
+    
+    # Add argument for modify mode
+    parser_modify = subparsers.add_parser(
+            'modify', help='Change labeled, unlabeled oracle dataset after activation function values is calculated'
+            )
+    parser_modify.add_argument(
             "-U", "--unlabeled_dataset", type=str,
             help="where to read unlabelded dataset", required=True
             )
-    parser.add_argument(
+    parser_modify.add_argument(
             "-L", "--labeled_dataset", type=str,
             help="where to read labeled dataset, split by comma, e.g. l.de,l.en", required=True
             )
-    parser.add_argument(
+    parser_modify.add_argument(
             "--oracle", type=str,
             help="where to read oracle dataset",
             required=True
             )
-    parser.add_argument(
+    parser_modify.add_argument(
             "-tb", "--tok_budget", type=int,
             help="Token budget", required=True
             )
-    parser.add_argument(
+    parser_modify.add_argument(
             "-OU", "--output_unlabeled_dataset", type=str,
             help="path to store new unlabeled dataset", required=True
             )
-    parser.add_argument(
+    parser_modify.add_argument(
             "-OL", "--output_labeled_dataset", type=str,
             help="path to store new labeled dataset", required=True
             )
-    parser.add_argument(
+    parser_modify.add_argument(
             "-OO", "--output_oracle", type=str,
             help="path to oracle", required=True
             )
-    parser.add_argument(
-            "-a", "--active_func", type=str,
-            help="Active query function type", required=True
-            )
-    parser.add_argument(
-            '-ckpt', '--checkpoint', type=str,
-            help="Checkpoint path to reload network parameters"
-            )
-    parser.add_argument(
-            '-max_len', type=int, default=250,
-            help="Maximum length for generating translations"
-            )
-    parser.add_argument(
-            '-no_cuda', action="store_true",
-            help="Use cpu to do translation"
-            )
-    parser.add_argument(
-            '--batch_size', type=int, default=None,
-            help="Batch size for generating translations"
-            )
-    parser.add_argument(
-            '--max_batch_size', type=int, default=None,
-            help="Maximum batch size if tokens_per_batch is not None"
-            )
-    parser.add_argument(
-            '--tokens_per_batch', type=int, default=None,
-            help="Maximum number of tokens in a batch when generating translations"
+    parser_modify.add_argument('-AO', '--active_out', type=str,
+            help="path to active function output"
             )
     args = parser.parse_args()
 
-    # Read labeled and unlabeled datasets
-    f = open(args.unlabeled_dataset, 'r')
-    unlabeled_dataset = f.read().split("\n")[:-1]
-    f.close()
-
-    src_labeled_dataset, tgt_labeled_dataset = args.labeled_dataset.split(",")
-    labeled_dataset = []
-    f = open(src_labeled_dataset, 'r')
-    labeled_dataset.append(f.read().split("\n")[:-1])
-    f.close()
-
-    f = open(tgt_labeled_dataset, 'r')
-    labeled_dataset.append(f.read().split("\n")[:-1])
-    f.close()
-
-    # Read oracle
-    f = open(args.oracle, "r")
-    oracle = f.read().split("\n")[:-1]
-    assert len(oracle) == len(unlabeled_dataset)
-
-    # Query instances
-    queries, query_indices = query_instances(args, unlabeled_dataset, args.active_func, args.tok_budget)
-
-    # Label instances
-    labeled_queries = [queries]
-    labeled_queries.append( label_queries(query_indices, oracle) )
-
-    # Change datasets
-    unlabeled_dataset, labeled_dataset = change_datasets(
-            unlabeled_dataset, labeled_dataset, labeled_queries, query_indices
-            )
+    args.mode = "score" if hasattr(args, "active_func") else "modify"
     
-    oracle = [oracle[idx] for idx in range(len(oracle)) if idx not in query_indices]
-    # Store new labeled, unlabeled, oracle dataset
-    f = open(args.output_unlabeled_dataset, 'w')
-    f.write("\n".join(unlabeled_dataset) + "\n")
-    f.close()
+    if args.mode == "score":
+        f = open(args.input, 'r')
+        text = f.read().split('\n')
+        if text[-1] == "":
+            text = text[:-1]
+        f.close()
+        
+        f = open(args.reference, 'r')
+        ref_text = f.read().split('\n')
+        if ref_text[-1] == "":
+            ref_text = ref_text[:-1]
+        f.close()
+        query_instances(args, text, ref_text, args.active_func)
 
-    output_src_labeled_dataset, output_tgt_labeled_dataset = args.output_labeled_dataset.split(",")
-    f = open(output_src_labeled_dataset, 'w')
-    f.write("\n".join(labeled_dataset[0]) + "\n")
-    f.close()
+    else:
+        # Read labeled and unlabeled datasets
+        f = open(args.unlabeled_dataset, 'r')
+        unlabeled_dataset = f.read().split("\n")[:-1]
+        f.close()
 
-    f = open(output_tgt_labeled_dataset, 'w')
-    f.write("\n".join(labeled_dataset[1]) + "\n")
-    f.close()
+        src_labeled_dataset, tgt_labeled_dataset = args.labeled_dataset.split(",")
+        labeled_dataset = []
+        f = open(src_labeled_dataset, 'r')
+        labeled_dataset.append(f.read().split("\n")[:-1])
+        f.close()
 
-    f = open(args.output_oracle, 'w')
-    f.write("\n".join(oracle) + "\n")
-    f.close()
+        f = open(tgt_labeled_dataset, 'r')
+        labeled_dataset.append(f.read().split("\n")[:-1])
+        f.close()
+
+        # Read oracle
+        f = open(args.oracle, "r")
+        oracle = f.read().split("\n")[:-1]
+        assert len(oracle) == len(unlabeled_dataset)
+
+        # Read active out
+        f = open(args.active_out, "r")
+        active_out = f.read().split("\n")[:-1]
+
+        # Label instances
+        labeled_queries = [queries]
+        labeled_queries.append( label_queries(query_indices, oracle) )
+
+        # Change datasets
+        unlabeled_dataset, labeled_dataset = change_datasets(
+                unlabeled_dataset, labeled_dataset, labeled_queries, query_indices
+                )
+        
+        oracle = [oracle[idx] for idx in range(len(oracle)) if idx not in query_indices]
+        # Store new labeled, unlabeled, oracle dataset
+        f = open(args.output_unlabeled_dataset, 'w')
+        f.write("\n".join(unlabeled_dataset) + "\n")
+        f.close()
+
+        output_src_labeled_dataset, output_tgt_labeled_dataset = args.output_labeled_dataset.split(",")
+        f = open(output_src_labeled_dataset, 'w')
+        f.write("\n".join(labeled_dataset[0]) + "\n")
+        f.close()
+
+        f = open(output_tgt_labeled_dataset, 'w')
+        f.write("\n".join(labeled_dataset[1]) + "\n")
+        f.close()
+
+        f = open(args.output_oracle, 'w')
+        f.write("\n".join(oracle) + "\n")
+        f.close()
 
 
 if __name__ == "__main__":

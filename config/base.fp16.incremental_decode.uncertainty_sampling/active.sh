@@ -6,6 +6,7 @@ L=$ACTIVE/labeled_
 ORACLE=$ACTIVE/oracle_
 ACTIVE_FUNC=lc
 N_ROUNDS=11
+START_ROUND=7
 SRC=de
 TGT=en
 
@@ -22,7 +23,7 @@ function main () {
 	# Initialize labeled and unlabeled dataset
 	mkdir -p $ACTIVE $tmp $prep
 
-	for i in $( seq 0 $N_ROUNDS )
+	for i in $( seq $START_ROUND $N_ROUNDS )
 	do	
 		# Train network on new labeled dataset
 		export NGPUS=8
@@ -51,7 +52,7 @@ function main () {
 			-OL $L$((i+1)).$SRC,$L$((i+1)).$TGT \
 			-OO $ORACLE$((i+1)) -a $ACTIVE_FUNC \
 			-ckpt checkpoints/$((i+1))/checkpoint_best_ppl.pth \
-			--max_batch_size 0 --tokens_per_batch 16384
+			--max_batch_size 0 --tokens_per_batch 8192
 	done
 	
 }
