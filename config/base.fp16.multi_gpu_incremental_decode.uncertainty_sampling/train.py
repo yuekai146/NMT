@@ -6,6 +6,7 @@ import argparse
 import os
 import pickle
 import torch
+from dataset import ParallelDataset, Dataset, Text, Batch, Vocab 
 
 
 def main():
@@ -69,9 +70,6 @@ def main():
             data_iter = iter(trainer.iterators["train"].get_iterator(True, True))
         else:
             if params.local_rank == 0:
-                if os.path.exists(config.data_bin) == False:
-                    os.makedirs(config.data_bin)
-
                 # Split dataset into NGPUS subsets, with the same number of batches
                 # Store NGPUS subsets in config.data_bin
                 subset_batches = trainer.iterators["train"].get_batch_ids(

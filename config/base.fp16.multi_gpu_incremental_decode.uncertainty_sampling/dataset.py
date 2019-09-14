@@ -6,9 +6,12 @@
 #
 
 from common import config
+import argparse
+import dill
 import math
 import numpy as np
 import os
+import pickle
 import torch
 
 
@@ -300,34 +303,88 @@ def get(params=None):
     return train_iter, valid_iter, SRC, TGT
 
 
+def load():
+        # Load train dataset
+        f = open(os.path.join(config.train_iter_dump_path), 'rb')
+        train_iter = dill.load(f)
+        f.close()
+        
+        # Load valid dataset
+        f = open(os.path.join(config.valid_iter_dump_path), 'rb')
+        valid_iter = dill.load(f)
+        f.close()
+        
+        # Dump src vocab
+        f = open(os.path.join(config.src_vocab_dump_path), 'rb')
+        SRC_TEXT = dill.load(f)
+        f.close()
+        
+        # Dump tgt vocab
+        f = open(os.path.join(config.tgt_vocab_dump_path), 'rb')
+        TGT_TEXT = dill.load(f)
+        f.close()
+
+        return train_iter, valid_iter, SRC_TEXT, TGT_TEXT
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--store', action="store_true", help="Store preprocessed dataset and vocab")
+    parser.add_argument('--test', action='store_true', help="Test dataset code")
+    args = parser.parse_args()
+
     train_iter, valid_iter, SRC_TEXT, TGT_TEXT = get()
+    
+    if args.test:
+        from utils import get_batch
+        def test_iterator(to_test):
+            def get_sents(tokens, vocab):
+                tokens = tokens.cpu().numpy().tolist()
+                sents = []
+                for s in tokens:
+                    sents.append(" ".join(vocab.itos[x] for x in s))
+                return sents
+            for i_batch, raw_batch in enumerate(iter(to_test)):
+                batch = get_batch(raw_batch.src, raw_batch.tgt, SRC_TEXT.vocab, TGT_TEXT.vocab)
 
-    from utils import get_batch
-    def test_iterator(to_test):
-        def get_sents(tokens, vocab):
-            tokens = tokens.cpu().numpy().tolist()
-            sents = []
-            for s in tokens:
-                sents.append(" ".join(vocab.itos[x] for x in s))
-            return sents
-        for i_batch, raw_batch in enumerate(iter(to_test)):
-            batch = get_batch(raw_batch.src, raw_batch.tgt, SRC_TEXT.vocab, TGT_TEXT.vocab)
+                src_sents = get_sents(batch["src"], SRC_TEXT.vocab)
+                tgt_sents = get_sents(batch["target"], TGT_TEXT.vocab)
+                tgt_in_sents = get_sents(batch["tgt"], TGT_TEXT.vocab)
+                assert len(src_sents) == len(tgt_sents)
+                assert len(tgt_sents) == len(tgt_in_sents)
+                for idx in range(len(src_sents)):
+                    print(src_sents[idx].replace("<pad>", ""))
+                    print(tgt_in_sents[idx].replace("<pad>", ""))
+                    print(tgt_sents[idx].replace("<pad>", ""))
+                    print("\n")
 
-            src_sents = get_sents(batch["src"], SRC_TEXT.vocab)
-            tgt_sents = get_sents(batch["target"], TGT_TEXT.vocab)
-            tgt_in_sents = get_sents(batch["tgt"], TGT_TEXT.vocab)
-            assert len(src_sents) == len(tgt_sents)
-            assert len(tgt_sents) == len(tgt_in_sents)
-            for idx in range(len(src_sents)):
-                print(src_sents[idx].replace("<pad>", ""))
-                print(tgt_in_sents[idx].replace("<pad>", ""))
-                print(tgt_sents[idx].replace("<pad>", ""))
-                print("\n")
+                print("Batch size:{}\n".format(batch["src"].size()))
 
-            print("Batch size:{}\n".format(batch["src"].size()))
+                if i_batch >= 0:
+                    break
+        test_iterator(train_iter.get_iterator(True, True))
+        #test_iterator(valid_iter.get_iterator(True, True))
 
-            if i_batch >= 0:
-                break
-    test_iterator(train_iter.get_iterator(True, True))
-    #test_iterator(valid_iter.get_iterator(True, True))
+    if args.store: 
+        if os.path.exists(config.data_bin) == False:
+            os.makedirs(config.data_bin)
+        
+        # Dump train dataset
+        f = open(os.path.join(config.train_iter_dump_path), 'wb')
+        pickle.dump(train_iter, f)
+        f.close()
+        
+        # Dump valid dataset
+        f = open(os.path.join(config.valid_iter_dump_path), 'wb')
+        pickle.dump(valid_iter, f)
+        f.close()
+        
+        # Dump src vocab
+        f = open(os.path.join(config.src_vocab_dump_path), 'wb')
+        pickle.dump(SRC_TEXT, f)
+        f.close()
+        
+        # Dump tgt vocab
+        f = open(os.path.join(config.tgt_vocab_dump_path), 'wb')
+        pickle.dump(TGT_TEXT, f)
+        f.close()

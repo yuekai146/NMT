@@ -25,12 +25,12 @@ class Encoder_Decoder(nn.Module):
         self.tgt_emb = tgt_emb
         self.generator = generator
 
-        if config.share_encoder_decoder_embed:
-            emb_params = []
-            for k, v in self.tgt_emb.named_parameters():
-                emb_params.append(v)
-            assert len(emb_params) == 1
-            self.generator.proj.weight = emb_params[0]
+        if config.share_decoder_generator_embed:
+            self.generator.proj.weight = self.tgt_emb[0].emb.weight
+
+        if config.share_all_embeddings:
+            self.tgt_emb[0].emb.weight = self.src_emb[0].emb.weight
+            self.generator.proj.weight = self.src_emb[0].emb.weight
 
     def forward(self, src, src_mask, tgt, tgt_mask, log_prob=True):
         return self.generator(
@@ -205,27 +205,20 @@ class Multi_Head_Attention(nn.Module):
         if cache is not None:
             if key is None:
                 if self.layer_id in cache:
-                    #print("In cache")
                     # Inference time self attention, cache been initialized
                     k, v = cache[self.layer_id]
                     key, value = shape(self.k_lin(query)), shape(self.v_lin(query))
                     key, value = torch.cat([k, key], dim=2), torch.cat([v, value], dim=2)
                 else:
-                    #print("Not in cache")
                     # Inference time self attention, cache needs to be initialized
                     key, value = shape(self.k_lin(query)), shape(self.v_lin(query))
             else:
                 if self.layer_id in cache:
-                    #print("In cache")
                     # Inference time src attention, cache been initiailized
                     key, value = cache[self.layer_id]
                 else:
-                    #print("Not in cache")
                     # Inference time src attention, cache needs to be initialized
                     key, value = shape(self.k_lin(key)), shape(self.v_lin(value))
-            #print("Key size {}".format(key.size()))
-            #print("Value size {}".format(value.size()))
-            #print("Query size {}".format(query.size()))
             cache[self.layer_id] = (key, value)
             output, self.attn = attention(q, key, value, mask, self.dropout)
         else:
@@ -259,10 +252,11 @@ class Embeddings(nn.Module):
     def __init__(self, d_model, n_vocab):
         super(Embeddings, self).__init__()
         self.emb = nn.Embedding(n_vocab, d_model)
+        nn.init.normal_(self.emb.weight, mean=0.0, std=d_model ** -0.5)
         self.d_model = d_model
 
     def forward(self, x):
-        return self.emb(x) * math.sqrt(self.d_model)
+        return self.emb(x)
 
 
 class Positional_Embeddings(nn.Module):
@@ -318,18 +312,18 @@ class Label_Smoothing_Loss(nn.Module):
 
 def dummpy_input():
     # Used for testing network forward and backward
-    lengths = np.random.randint(low=1, high=config.MAX_LEN, size=(config.BATCH_SIZE))
+    lengths = np.random.randint(low=1, high=int(config.tokens_per_batch / config.max_batch_size), size=(config.max_batch_size))
     src = []
     for l in lengths:
         src_sent = np.random.randint(low=config.N_SPECIAL_TOKENS, high=config.src_n_vocab, size=(l)).tolist()
-        src_sent += np.zeros(config.MAX_LEN - l).tolist()
+        src_sent += np.zeros(int(config.tokens_per_batch / config.max_batch_size) - l).tolist()
         src.append(src_sent)
 
-    lengths = np.random.randint(low=1, high=config.MAX_LEN, size=(config.BATCH_SIZE))
+    lengths = np.random.randint(low=1, high=int(config.tokens_per_batch / config.max_batch_size), size=(config.max_batch_size))
     tgt = []
     for l in lengths:
         tgt_sent = np.random.randint(low=config.N_SPECIAL_TOKENS, high=config.tgt_n_vocab, size=(l)).tolist()
-        tgt_sent += np.zeros(config.MAX_LEN - l).tolist()
+        tgt_sent += np.zeros(int(config.tokens_per_batch / config.max_batch_size) - l).tolist()
         tgt.append(tgt_sent)
 
     src, tgt = torch.from_numpy(np.array(src)).long(), torch.from_numpy(np.array(tgt)).long()
@@ -354,9 +348,10 @@ def get():
             nn.Sequential(Embeddings(config.d_model, config.tgt_n_vocab), c(position)),
             Generator(config.d_model, config.tgt_n_vocab)
             )
-    for p in net.parameters():
-        if p.dim() > 1:
-            nn.init.xavier_uniform_(p)
+    for name, p in net.named_parameters():
+        if 'emb' not in name:
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
     
     for name, module in net.named_modules():
         if name.endswith("attn"):

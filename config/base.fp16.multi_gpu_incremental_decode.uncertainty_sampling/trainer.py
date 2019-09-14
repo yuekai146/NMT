@@ -47,12 +47,16 @@ class Trainer(object):
 
         # data iterators
         self.iterators = {}
-        train_iter, valid_iter, SRC_TEXT, TGT_TEXT = dataset.get(params)
+        train_iter, valid_iter, SRC_TEXT, TGT_TEXT = dataset.load()
+        torch.distributed.barrier()
+        print("Process {}, dataset loaded.".format(params.local_rank))
         self.iterators["train"] = train_iter
         self.iterators["valid"] = valid_iter
         self.num_train = len(train_iter)
         self.SRC_TEXT = SRC_TEXT
         self.TGT_TEXT = TGT_TEXT
+
+        torch.distributed.barrier()
 
         # Multi-GPU
         assert config.amp >= 1 or not config.fp16
@@ -65,6 +69,7 @@ class Trainer(object):
         # set optimizers
         self.opt = optimizer.get(self.net)
 
+        torch.distributed.barrier()
         # Float16 / distributed
         if config.fp16:
             self.init_amp()
@@ -107,6 +112,7 @@ class Trainer(object):
 
         # reload potential checkpoints
         self.reload_checkpoint(network_only=config.reload_network_only)
+        print("Process {}, trainer initialized.".format(params.local_rank))
 
 
     def optimize(self, loss):
