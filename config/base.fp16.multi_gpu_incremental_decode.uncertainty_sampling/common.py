@@ -41,18 +41,19 @@ class Config:
     # Wrong n_vocab, should minus 1
     src_n_vocab = len(open(SRC_VOCAB_PATH, 'r').read().split('\n')) - 1 + N_SPECIAL_TOKENS
     tgt_n_vocab = len(open(TGT_VOCAB_PATH, 'r').read().split('\n')) - 1 + N_SPECIAL_TOKENS
-
+    
     if share_all_embeddings:
         assert src_n_vocab == tgt_n_vocab
     SRC_LAN = "de"
     TGT_LAN = "en"
     BATCH_SIZE = 128
-    tokens_per_batch = 5000 # if tokens_per_batch > 0, ignore BATCH_SIZE
+    tokens_per_batch = 4096 # if tokens_per_batch > 0, ignore BATCH_SIZE
     max_batch_size = 1000 
 
     # For optimizer
     opt_warmup = 4000
-    lr = 1e-4
+    lr = 7e-4
+    init_lr = 1e-7
     beta1 = 0.9
     beta2 = 0.98
     weight_decay = 0.0001

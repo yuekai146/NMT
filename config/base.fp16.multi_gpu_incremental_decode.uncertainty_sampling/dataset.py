@@ -281,8 +281,10 @@ def get(params=None):
     
     def read_sents(fpath):
         return open(fpath, 'r').read().split('\n')[:-1]
+
     src_sents = read_sents(config.SRC_RAW_TRAIN_PATH)
     tgt_sents = read_sents(config.TGT_RAW_TRAIN_PATH)
+    print("Parallel sentences already read!")
     assert len(src_sents) == len(tgt_sents)
 
     train_iter = ParallelDataset(

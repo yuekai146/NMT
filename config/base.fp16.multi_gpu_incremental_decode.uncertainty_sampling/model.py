@@ -84,7 +84,7 @@ class Encoder(nn.Module):
 
 class Layer_Norm(nn.Module):
 
-    def __init__(self, size, eps=1e-6):
+    def __init__(self, size, eps=1e-12):
         super(Layer_Norm, self).__init__()
         self.param_std = nn.Parameter(torch.ones(size))
         self.param_mean = nn.Parameter(torch.zeros(size))
@@ -252,11 +252,10 @@ class Embeddings(nn.Module):
     def __init__(self, d_model, n_vocab):
         super(Embeddings, self).__init__()
         self.emb = nn.Embedding(n_vocab, d_model)
-        nn.init.normal_(self.emb.weight, mean=0.0, std=d_model ** -0.5)
         self.d_model = d_model
 
     def forward(self, x):
-        return self.emb(x)
+        return self.emb(x) * math.sqrt(self.d_model)
 
 
 class Positional_Embeddings(nn.Module):
@@ -349,9 +348,8 @@ def get():
             Generator(config.d_model, config.tgt_n_vocab)
             )
     for name, p in net.named_parameters():
-        if 'emb' not in name:
-            if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
     
     for name, module in net.named_modules():
         if name.endswith("attn"):

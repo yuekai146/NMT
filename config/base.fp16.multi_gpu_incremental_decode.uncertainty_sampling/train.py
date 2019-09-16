@@ -91,6 +91,7 @@ def main():
             num_train = sum([len(b) for b in subset_batches])
             trainer.num_train = num_train
 
+
         for i_batch, raw_batch in enumerate(data_iter):
             try:
                 trainer.train_step(raw_batch)

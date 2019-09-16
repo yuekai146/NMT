@@ -171,7 +171,7 @@ class Trainer(object):
         if self.n_total_iter % config.print_interval != 0:
             return
 
-        num_sents_trained_within_epoch = self.n_sentences % self.num_train
+        num_sents_trained_within_epoch = self.n_sentences
         s_iter = "{} - epoch_{}:{}% - ".format(
                 self.n_total_iter,
                 self.epoch,
@@ -338,6 +338,7 @@ class Trainer(object):
                 exit()
 
         self.epoch += 1
+        self.n_sentences = 0
 
 
 class Enc_Dec_Trainer(Trainer):
@@ -392,15 +393,6 @@ class Enc_Dec_Trainer(Trainer):
         """
         Evaluate perplexity and next word prediction accuracy.
         """
-
-        self.net.eval()
-        self.criterion.eval()
-        if config.multi_gpu:
-            self.net.module.eval()
-            net = self.net.module
-        else:
-            net = self.net
-
         data_iter = iter(self.iterators["valid"].get_iterator(True, True))
 
         n_words = 0
@@ -408,6 +400,13 @@ class Enc_Dec_Trainer(Trainer):
         n_valid = 0
         
         with torch.no_grad():
+            torch.cuda.empty_cache()
+            self.net.eval()
+            self.criterion.eval()
+            if config.multi_gpu:
+                net = self.net.module
+            else:
+                net = self.net
             
             for i_batch, raw_batch in enumerate(data_iter):
                 # generate batch
