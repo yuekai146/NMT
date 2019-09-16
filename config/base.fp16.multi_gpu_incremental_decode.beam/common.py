@@ -4,12 +4,12 @@ class Config:
     encoder_num_layers = 6
     decoder_num_layers = 6
     d_model = 512
-    d_ff = 2048
-    num_heads = 8
+    d_ff = 1024
+    num_heads = 4
     dropout = 0.1
     label_smoothing = 0.1
     share_decoder_generator_embed = True
-    share_all_embeddings = True
+    share_all_embeddings = False
     
     BOS = "<s>"
     EOS = "</s>"
@@ -21,16 +21,16 @@ class Config:
     
     # data paths
     DATA_PATH="../../data/de-en"
-    SRC_RAW_TRAIN_PATH = DATA_PATH + "/wmt17_de_en/train.de"
-    TGT_RAW_TRAIN_PATH = DATA_PATH + "/wmt17_de_en/train.en"
-    SRC_RAW_VALID_PATH = DATA_PATH + "/wmt17_de_en/valid.de"
-    TGT_RAW_VALID_PATH = DATA_PATH + "/wmt17_de_en/valid.en"
+    SRC_RAW_TRAIN_PATH = DATA_PATH + "/iwslt14_de_en/train.de"
+    TGT_RAW_TRAIN_PATH = DATA_PATH + "/iwslt14_de_en/train.en"
+    SRC_RAW_VALID_PATH = DATA_PATH + "/iwslt14_de_en/valid.de"
+    TGT_RAW_VALID_PATH = DATA_PATH + "/iwslt14_de_en/valid.en"
     if share_all_embeddings:
-        SRC_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.total"
-        TGT_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.total"
+        SRC_VOCAB_PATH = DATA_PATH + "/iwslt14_de_en/vocab.total"
+        TGT_VOCAB_PATH = DATA_PATH + "/iwslt14_de_en/vocab.total"
     else:
-        SRC_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.de"
-        TGT_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.en"
+        SRC_VOCAB_PATH = DATA_PATH + "/iwslt14_de_en/vocab.de"
+        TGT_VOCAB_PATH = DATA_PATH + "/iwslt14_de_en/vocab.en"
 
     data_bin = "data_bin/"
     train_iter_dump_path = data_bin + "train_iter"

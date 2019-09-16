@@ -19,6 +19,9 @@ BPE_CODE=../../data/de-en/iwslt14_de_en/code
 
 SCRIPTS=/data/mosesdecoder/scripts
 CLEAN=$SCRIPTS/training/clean-corpus-n.perl
+FAIRSEQ_PATH=/data/fairseq
+TEST_INPUT=/data/NMT/data/de-en/iwslt14_de_en/test.de
+TEST_REF=/data/NMT/data/de-en/iwslt14_de_en/test.en
 
 function main () {
 	# Initialize labeled and unlabeled dataset
@@ -44,6 +47,18 @@ function main () {
 		rm -rf checkpoints/$((i+1))/checkpoint_?.pth
 		rm -rf checkpoints/$((i+1))/checkpoint_??.pth
 		rm -rf checkpoints/$((i+1))/checkpoint_???.pth
+
+		python3 translate.py -ckpt checkpoints/$((i+1))/checkpoint_best_ppl.pth \
+			-text $TEST_INPUT -ref_text $TEST_REF \
+			--max_batch_size 0 --tokens_per_batch 2000 -k 5 -max_len 200 > checkpoints/$((i+1))/total.out
+
+		cat checkpoints/$((i+1))/total.out | grep ^H | cut -d " " -f2- > checkpoints/$((i+1))/sys.out
+		cat checkpoints/$((i+1))/total.out | grep ^T | cut -d " " -f2- > checkpoints/$((i+1))/ref.out
+
+		cat checkpoints/$((i+1))/sys.out | perl -ple 's{(\S)-(\S)}{$1 ##AT##-##AT## $2}g' > checkpoints/$((i+1))/generate.sys
+		cat checkpoints/$((i+1))/ref.out | perl -ple 's{(\S)-(\S)}{$1 ##AT##-##AT## $2}g' > checkpoints/$((i+1))/generate.ref
+
+		python3 $FAIRSEQ_PATH/score.py --sys checkpoints/$((i+1))/generate.sys --ref checkpoints/$((i+1))/generate.ref > checkpoints/$((i+1))/bleu.txt
 		
 		# Do active learning
 		cd active_data
