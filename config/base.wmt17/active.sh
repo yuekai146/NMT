@@ -33,7 +33,7 @@ function main () {
 		export NGPUS=8
 		rm -rf data_bin
 		python3 dataset.py --store --SRC_RAW_TRAIN_PATH $L$i.$SRC \
-			--TGT_RAW_TRAIN_PATH $L$i.$TGT 
+			--TGT_RAW_TRAIN_PATH $L.$i.$TGT 
 		if [ $i -eq 0 ]; then
 			python3 -m torch.distributed.launch --nproc_per_node=$NGPUS train.py \
 				--raw_src $L$i.$SRC \
@@ -53,7 +53,7 @@ function main () {
 
 		python3 translate.py -ckpt checkpoints/$((i+1))/checkpoint_best_ppl.pth \
 			-text $TEST_INPUT -ref_text $TEST_REF \
-			--max_batch_size 0 --tokens_per_batch 2000 --greedy -max_len 200 > checkpoints/$((i+1))/total.out
+			--max_batch_size 0 --tokens_per_batch 2000 -k 5 -max_len 200 > checkpoints/$((i+1))/total.out
 
 		cat checkpoints/$((i+1))/total.out | grep ^H | cut -d " " -f2- > checkpoints/$((i+1))/sys.out
 		cat checkpoints/$((i+1))/total.out | grep ^T | cut -d " " -f2- > checkpoints/$((i+1))/ref.out
@@ -65,7 +65,7 @@ function main () {
 		
 		# Do active learning
 		cd active_data
-		num_U=$(cat unlabeled_${i} | wc -l)
+		num_U=$(cat unlabeled_0 | wc -l)
 		num_chunk=$(($num_U / $NGPUS + 1))
 		split -l $num_chunk unlabeled_$i unlabeled_${i}_ -da 1
 		split -l $num_chunk oracle_$i oracle_${i}_ -da 1
@@ -82,7 +82,7 @@ function main () {
 		parallel -j $NGPUS < parallel_active.sh
 		rm parallel_active.sh
 		mv test_active.out_${i}_? active_data/
-		cat active_data/test_active.out_${i}_? >> active_data/test_active.out_$i
+		cat active_data/test_active.out_${i}_? > active_data/test_active.out_$i
 		python3 active.py modify -U $U$i -L $L$i.$SRC,$L$i.$TGT --oracle $ORACLE$i -tb 279315 \
 			-OU $U$((i+1)) -OL $L$((i+1)).$SRC,$L$((i+1)).$TGT \
 			-OO $ORACLE$((i+1)) -AO $ACTIVE_OUT$i 

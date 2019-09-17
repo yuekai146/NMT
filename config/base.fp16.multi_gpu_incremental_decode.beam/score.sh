@@ -1,6 +1,6 @@
 FAIRSEQ_PATH=/data/fairseq
 
-python3 translate.py -ckpt ../base.fp16.incremental_decode/checkpoints/checkpoint_best_ppl.pth -text /data/NMT/data/de-en/iwslt14_de_en/test.de -ref_text /data/NMT/data/de-en/iwslt14_de_en/test.en --max_batch_size 0 --tokens_per_batch 2000 --greedy -max_len 200 > total.out
+python3 translate.py -ckpt ../base.fp16.incremental_decode/checkpoints/checkpoint_best_ppl.pth -text /data/NMT/data/de-en/wmt17_de_en/test.de -ref_text /data/NMT/data/de-en/wmt17_de_en/test.en --max_batch_size 0 --tokens_per_batch 2000 -max_len 200 --greedy > total.out
 
 cat total.out | grep ^H | cut -d " " -f2- > sys.out
 cat total.out | grep ^T | cut -d " " -f2- > ref.out

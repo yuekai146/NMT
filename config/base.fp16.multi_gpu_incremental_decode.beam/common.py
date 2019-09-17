@@ -72,7 +72,7 @@ class Config:
     # For trainer
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
-    epoch_size = 150
+    epoch_size = 15
     continue_path = None
     dump_path = "checkpoints/"
     reload_network_only = True

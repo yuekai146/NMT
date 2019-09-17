@@ -6,10 +6,11 @@ class Config:
     d_model = 512
     d_ff = 1024
     num_heads = 4
-    dropout = 0.1
+    dropout = 0.3
     label_smoothing = 0.1
     share_decoder_generator_embed = True
     share_all_embeddings = True
+    gelu_activation = True
     
     BOS = "<s>"
     EOS = "</s>"
@@ -52,11 +53,11 @@ class Config:
 
     # For optimizer
     opt_warmup = 4000
-    lr = 7e-4
-    init_lr = 1e-7
+    lr = 5e-4
+    init_lr = None
     beta1 = 0.9
     beta2 = 0.98
-    weight_decay = 0.0001
+    weight_decay = 1e-4
     opt_eps = 1e-9
 
     # For fp16 training
