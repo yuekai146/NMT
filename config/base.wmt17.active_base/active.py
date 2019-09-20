@@ -186,10 +186,25 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
     indices = np.arange(len(unlabeled_dataset))
     if active_func == "random":
         np.random.shuffle(indices)
+        for idx in indices:
+            print("S: ", unlabeled_dataset[idx])
+            print("T: ", oracle[idx])
+            print("V: 0.0")
+            print("I: ", args.input, args.reference, idx)
     elif active_func == "longest":
         indices = indices[np.argsort(-lengths[indices])]
+        for idx in indices:
+            print("S: ", unlabeled_dataset[idx])
+            print("T: ", oracle[idx])
+            print("V: ", lengths[idx])
+            print("I: ", args.input, args.reference, idx)
     elif active_func == "shortest":
         indices = indices[np.argsort(lengths[indices])]
+        for idx in indices:
+            print("S: ", unlabeled_dataset[idx])
+            print("T: ", oracle[idx])
+            print("V: ", lengths[idx])
+            print("I: ", args.input, args.reference, idx)
     elif active_func in ["lc", "margin", "te", "tte"]:
         result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
         result = sorted(result, key=lambda item:item[0])
@@ -201,12 +216,6 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
             print("T: ", oracle[result[idx][1]])
             print("V: ", result[idx][0])
             print("I: ", args.input, args.reference, result[idx][1])
-
-    '''
-    include = np.cumsum(lengths[indices]) <= tok_budget
-    include = indices[include]
-    return [unlabeled_dataset[idx] for idx in include], include
-    '''
 
 
 def main():
