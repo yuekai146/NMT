@@ -173,7 +173,7 @@ def attention(query, key, value, mask=None, dropout=None):
     if dropout is not None:
         attn_score = dropout(attn_score)
 
-    return torch.matmul(attn_score, value)
+    return torch.matmul(attn_score, value), attn_score
 
 
 class Multi_Head_Attention(nn.Module):
@@ -225,7 +225,7 @@ class Multi_Head_Attention(nn.Module):
                     # Inference time src attention, cache needs to be initialized
                     key, value = shape(self.k_lin(key)), shape(self.v_lin(value))
             cache[self.layer_id] = (key, value)
-            output = attention(q, key, value, mask, self.dropout)
+            output, self.attn = attention(q, key, value, mask, self.dropout)
         else:
             if key is None:
                 # Training time self attention
@@ -234,7 +234,7 @@ class Multi_Head_Attention(nn.Module):
                 # Training time src attention
                 key, value = shape(self.k_lin(key)), shape(self.v_lin(value))
                 
-            output  = attention(q, key, value, mask, self.dropout)
+            output, self.attn = attention(q, key, value, mask, self.dropout)
         output = unshape(output)
 
         return self.out_lin(output)
@@ -265,6 +265,26 @@ class Embeddings(nn.Module):
 
     def forward(self, x):
         return self.emb(x)
+
+'''
+class Positional_Embeddings(nn.Module):
+
+    def __init__(self, d_model, dropout, max_len=5000):
+        super(Positional_Embeddings, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0., max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0., d_model, 2) * -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x, start=0):
+        x = x + Variable(self.pe[:, start:start+x.size(1)], requires_grad=False)
+        return self.dropout(x)
+'''
 
 
 class Positional_Embeddings(nn.Module):

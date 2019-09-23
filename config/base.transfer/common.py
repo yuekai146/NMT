@@ -21,17 +21,17 @@ class Config:
     MAX_LEN = 250 
     
     # data paths
-    DATA_PATH="../../data/de-en"
-    SRC_RAW_TRAIN_PATH = DATA_PATH + "/wmt17_de_en/filtered_train.de"
-    TGT_RAW_TRAIN_PATH = DATA_PATH + "/wmt17_de_en/filtered_train.en"
-    SRC_RAW_VALID_PATH = DATA_PATH + "/wmt17_de_en/valid.de"
-    TGT_RAW_VALID_PATH = DATA_PATH + "/wmt17_de_en/valid.en"
+    DATA_PATH="../../data/defr-en"
+    SRC_RAW_TRAIN_PATH = DATA_PATH + "/train.fr-en.fr"
+    TGT_RAW_TRAIN_PATH = DATA_PATH + "/train.fr-en.en"
+    SRC_RAW_VALID_PATH = DATA_PATH + "/valid.fr-en.fr"
+    TGT_RAW_VALID_PATH = DATA_PATH + "/valid.fr-en.en"
     if share_all_embeddings:
-        SRC_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/filtered_vocab.total"
-        TGT_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/filtered_vocab.total"
+        SRC_VOCAB_PATH = DATA_PATH + "/vocab.total"
+        TGT_VOCAB_PATH = DATA_PATH + "/vocab.total"
     else:
-        SRC_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.de"
-        TGT_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.en"
+        SRC_VOCAB_PATH = DATA_PATH + "/vocab.fr"
+        TGT_VOCAB_PATH = DATA_PATH + "/vocab.en"
 
     data_bin = "data_bin/"
     train_iter_dump_path = data_bin + "train_iter"
@@ -45,7 +45,7 @@ class Config:
     
     if share_all_embeddings:
         assert src_n_vocab == tgt_n_vocab
-    SRC_LAN = "de"
+    SRC_LAN = "fr"
     TGT_LAN = "en"
     BATCH_SIZE = 128
     tokens_per_batch = 4096 # if tokens_per_batch > 0, ignore BATCH_SIZE

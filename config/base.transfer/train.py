@@ -87,8 +87,6 @@ def main():
             f = open(os.path.join(config.data_bin, "batches_" + str(params.local_rank)), 'rb')
             subset_batches = pickle.load(f)
             f.close()
-            n_batches = len(subset_batches)
-            print("Process {}, n_batches is {}".format(params.local_rank, n_batches))
             data_iter = iter(trainer.iterators["train"].get_batches_iterator(subset_batches))
             num_train = sum([len(b) for b in subset_batches])
             trainer.num_train = num_train
@@ -96,13 +94,11 @@ def main():
 
         for i_batch, raw_batch in enumerate(data_iter):
             try:
-                if i_batch == n_batches - 1:
-                    print(raw_batch.src.size())
                 trainer.train_step(raw_batch)
                 trainer.iter()
             except RuntimeError:
                 continue
-
+        
         scores = trainer.valid_step()
         trainer.save_best_model(scores)
         trainer.save_periodic()

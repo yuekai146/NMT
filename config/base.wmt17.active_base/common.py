@@ -48,7 +48,7 @@ class Config:
     SRC_LAN = "de"
     TGT_LAN = "en"
     BATCH_SIZE = 128
-    tokens_per_batch = 4096 # if tokens_per_batch > 0, ignore BATCH_SIZE
+    tokens_per_batch = 2048 # if tokens_per_batch > 0, ignore BATCH_SIZE
     max_batch_size = 1000 
 
     # For optimizer
@@ -78,7 +78,7 @@ class Config:
     dump_path = "checkpoints/"
     reload_network_only = True
     clip_grad_norm = 0.0
-    accumulate_gradients = 1
+    accumulate_gradients = 2
     save_periodic = 1
     valid_metrics = {"ppl":-1}
     init_metric = -1e12

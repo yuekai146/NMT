@@ -317,7 +317,7 @@ def main():
         f.close()
         query_instances(args, text, ref_text, args.active_func)
 
-    elif args.mode == "modify":
+    else:
         # Read labeled and unlabeled datasets
         f = open(args.unlabeled_dataset, 'r')
         unlabeled_dataset = f.read().split("\n")[:-1]
@@ -388,8 +388,6 @@ def main():
         f = open(args.output_oracle, 'w')
         f.write("\n".join(oracle) + "\n")
         f.close()
-    else:
-        raise("Invalid mode! Only two modes, score or modify")
 
 
 if __name__ == "__main__":

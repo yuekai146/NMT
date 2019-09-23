@@ -237,7 +237,7 @@ class ParallelDataset(Dataset):
         if shuffle:
             indices = np.random.permutation(len(self.sent1))
         else:
-            indices = np.arange(len(self.sent1))
+            indices = np.arange(len(sent1))
 
         # group sentences by lengths
         if group_by_size:
@@ -309,7 +309,6 @@ def get(params=None):
             TGT.vocab
             )
     valid_iter.tokens_per_batch = 2000
-    #valid_iter.batch_size = 32
 
     return train_iter, valid_iter, SRC, TGT
 
