@@ -21,17 +21,17 @@ class Config:
     MAX_LEN = 250 
     
     # data paths
-    DATA_PATH="../../data/defr-en"
-    SRC_RAW_TRAIN_PATH = DATA_PATH + "/train.de-en.de"
-    TGT_RAW_TRAIN_PATH = DATA_PATH + "/train.de-en.en"
-    SRC_RAW_VALID_PATH = DATA_PATH + "/valid.de-en.de"
-    TGT_RAW_VALID_PATH = DATA_PATH + "/valid.de-en.en"
+    DATA_PATH="../../data/de-en"
+    SRC_RAW_TRAIN_PATH = DATA_PATH + "/wmt17_de_en/train.de"
+    TGT_RAW_TRAIN_PATH = DATA_PATH + "/wmt17_de_en/train.en"
+    SRC_RAW_VALID_PATH = DATA_PATH + "/wmt17_de_en/valid.de"
+    TGT_RAW_VALID_PATH = DATA_PATH + "/wmt17_de_en/valid.en"
     if share_all_embeddings:
-        SRC_VOCAB_PATH = DATA_PATH + "/vocab.total"
-        TGT_VOCAB_PATH = DATA_PATH + "/vocab.total"
+        SRC_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.total"
+        TGT_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.total"
     else:
-        SRC_VOCAB_PATH = DATA_PATH + "/vocab.de"
-        TGT_VOCAB_PATH = DATA_PATH + "/vocab.en"
+        SRC_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.de"
+        TGT_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.en"
 
     data_bin = "data_bin/"
     train_iter_dump_path = data_bin + "train_iter"
@@ -74,8 +74,8 @@ class Config:
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
     epoch_size = 150
-    continue_path = "checkpoints/init/checkpoint_best_ppl.pth"
-    dump_path = "checkpoints"
+    continue_path = None
+    dump_path = "checkpoints/"
     reload_network_only = True
     clip_grad_norm = 0.0
     accumulate_gradients = 2

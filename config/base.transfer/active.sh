@@ -4,7 +4,7 @@ U=$ACTIVE/unlabeled_
 L=$ACTIVE/labeled_
 ORACLE=$ACTIVE/oracle_
 ACTIVE_FUNC=random
-START_ROUND=0
+START_ROUND=1
 N_ROUNDS=11
 NGPUS=8
 TOK_BUDGET=1600000
@@ -24,10 +24,12 @@ TEST_REF=../../data/defr-en/test.de-en.en
 
 function main () {
 	# Initialize labeled and unlabeled dataset
-	mkdir -p $ACTIVE
-	cp $ORIG_SRC ${U}0
-	cp $ORIG_TGT ${ORACLE}0
-	touch ${L}0.$SRC ${L}0.$TGT
+	if [ $START_ROUND -eq 0 ]; then
+		mkdir -p $ACTIVE
+		cp $ORIG_SRC ${U}0
+		cp $ORIG_TGT ${ORACLE}0
+		touch ${L}0.$SRC ${L}0.$TGT
+	fi
 
 	for i in $( seq $START_ROUND $N_ROUNDS )
 	do	

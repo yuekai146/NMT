@@ -14,3 +14,4 @@ config/*/*.txt
 data/*
 config/base.fp16.incremental_decode.uncertainty_sampling.*/*/
 config/*/result/
+config/*/__pycache__/

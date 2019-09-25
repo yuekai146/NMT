@@ -12,19 +12,15 @@ from torch.autograd import Variable
 from utils import subsequent_mask, remove_bpe, remove_special_tok
 
 
-def gen_batch2str(src, generated, gen_len, src_vocab, tgt_vocab):
+def gen_batch2str(generated, gen_len, tgt_vocab):
     generated = generated.cpu().numpy().tolist()
     gen_len = gen_len.cpu().numpy().tolist()
-    src = src.cpu().numpy().tolist()
     translated = []
     for i, l in enumerate(generated):
         l = l[:gen_len[i]]
         sys_sent = " ".join([tgt_vocab.itos[tok] for tok in l])
-        src_sent = " ".join([src_vocab.itos[tok] for tok in src[i]])
         sys_sent = remove_special_tok(remove_bpe(sys_sent))
-        src_sent = remove_special_tok(remove_bpe(src_sent))
-        translated.append("S: " + src_sent)
-        translated.append("H: " + sys_sent)
+        translated.append(sys_sent)
     return translated
 
 
@@ -71,6 +67,8 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
                 q_scores = q_scores[:, 0] - q_scores[:, 1]
             elif active_func == "te" or active_func == "tte":
                 q_scores = -torch.distributions.categorical.Categorical(probs=scores).entropy()
+            else:
+                q_scores = scores.new_zeros(bsz)
             q_scores = q_scores.view(bsz)
             assert q_scores.size() == (bsz,), q_scores
             
@@ -89,26 +87,23 @@ def _get_scores(args, net, active_func, src, src_mask, indices, src_vocab, tgt_v
             if unfinished_sents.max() == 0:
                 break
 
-        '''
         if cur_len == max_len:
             generated[:, -1].masked_fill_(unfinished_sents.bool(), tgt_vocab.stoi[config.EOS])
         
-        translated = gen_batch2str(src, generated[:, :cur_len], gen_len, src_vocab, tgt_vocab)
-        for new_sent in translated:
-            print(new_sent)
-        '''
+        translated = gen_batch2str(generated[:, :cur_len], gen_len, tgt_vocab)
 
         if average_by_length:
             query_scores = query_scores / gen_len.float()
         query_scores = query_scores.cpu().numpy().tolist()
         indices = indices.tolist()
         assert len(query_scores) == len(indices)
-        for q_s, idx in zip(query_scores, indices):
-            result.append((q_s, idx))
+        assert len(query_scores) == len(translated)
+        for i in range(len(query_scores)):
+            result.append((query_scores[i], indices[i], translated[i]))
     return result
 
 
-def split_batch(src, indices, max_batch_size=800):
+def split_batch(src, indices, max_batch_size=500):
     bsz = src.size(0)
     if bsz <= max_batch_size:
         splited = False
@@ -158,53 +153,73 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
     lengths = np.array([len(remove_special_tok(remove_bpe(s)).split()) for s in unlabeled_dataset])
     
     # Preparations before querying instances
-    if active_func in ["lc", "margin", "te", "tte"]:
-        # Reloading network parameters
-        args.use_cuda = ( args.no_cuda == False ) and torch.cuda.is_available()
-        net, _ = model.get()
+    # Reloading network parameters
+    args.use_cuda = ( args.no_cuda == False ) and torch.cuda.is_available()
+    net, _ = model.get()
 
-        assert os.path.exists(args.checkpoint)
-        net, src_vocab, tgt_vocab = load_model(args.checkpoint, net)
+    assert os.path.exists(args.checkpoint)
+    net, src_vocab, tgt_vocab = load_model(args.checkpoint, net)
 
-        if args.use_cuda:
-            net = net.cuda()
-        
-        # Initialize inference dataset (Unlabeled dataset)
-        infer_dataset = Dataset(unlabeled_dataset, src_vocab)
-        if args.batch_size is not None:
-            infer_dataset.BATCH_SIZE = args.batch_size
-        if args.max_batch_size is not None:
-            infer_dataset.max_batch_size = args.max_batch_size
-        if args.tokens_per_batch is not None:
-            infer_dataset.tokens_per_batch = args.tokens_per_batch
+    if args.use_cuda:
+        net = net.cuda()
+    
+    # Initialize inference dataset (Unlabeled dataset)
+    infer_dataset = Dataset(unlabeled_dataset, src_vocab)
+    if args.batch_size is not None:
+        infer_dataset.BATCH_SIZE = args.batch_size
+    if args.max_batch_size is not None:
+        infer_dataset.max_batch_size = args.max_batch_size
+    if args.tokens_per_batch is not None:
+        infer_dataset.tokens_per_batch = args.tokens_per_batch
 
-        infer_dataiter = iter(infer_dataset.get_iterator(
-            shuffle=True, group_by_size=True, include_indices=True
-            ))
+    infer_dataiter = iter(infer_dataset.get_iterator(
+        shuffle=True, group_by_size=True, include_indices=True
+        ))
 
     # Start ranking unlabeled dataset
     indices = np.arange(len(unlabeled_dataset))
     if active_func == "random":
-        np.random.shuffle(indices)
+        result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
+        random.shuffle(result)
+        indices = [item[1] for item in result]
+        indices = np.array(indices).astype('int')
         for idx in indices:
             print("S: ", unlabeled_dataset[idx])
+            print("H: ", result[idx][2])
+            print("T: ", oracle[idx])
+            print("V: ", result[idx][0])
+            print("I: ", args.input, args.reference, idx)
+    elif active_func == "longest":
+        result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
+        result = [(
+            len(remove_special_tok(remove_bpe(unlabeled_dataset[item[1]])).split(' ')),
+            item[1], item[2] 
+            ) for item in result]
+        result = sorted(result, key=lambda item:-item[0])
+        indices = [item[1] for item in result]
+        indices = np.array(indices).astype('int')
+        for idx in indices:
+            print("S: ", unlabeled_dataset[idx])
+            print("H: ", result[idx][2])
+            print("T: ", oracle[idx])
+            print("V: ", result[idx][0])
+            print("I: ", args.input, args.reference, idx)
+    elif active_func == "shortest":
+        result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
+        result = [(
+            len(remove_special_tok(remove_bpe(unlabeled_dataset[item[1]])).split(' ')),
+            item[1], item[2] 
+            ) for item in result]
+        result = sorted(result, key=lambda item:item[0])
+        indices = [item[1] for item in result]
+        indices = np.array(indices).astype('int')
+        for idx in indices:
+            print("S: ", unlabeled_dataset[idx])
+            print("H: ", result[idx][2])
             print("T: ", oracle[idx])
             print("V: 0.0")
             print("I: ", args.input, args.reference, idx)
-    elif active_func == "longest":
-        indices = indices[np.argsort(-lengths[indices])]
-        for idx in indices:
-            print("S: ", unlabeled_dataset[idx])
-            print("T: ", oracle[idx])
-            print("V: ", lengths[idx])
-            print("I: ", args.input, args.reference, idx)
-    elif active_func == "shortest":
         indices = indices[np.argsort(lengths[indices])]
-        for idx in indices:
-            print("S: ", unlabeled_dataset[idx])
-            print("T: ", oracle[idx])
-            print("V: ", lengths[idx])
-            print("I: ", args.input, args.reference, idx)
     elif active_func in ["lc", "margin", "te", "tte"]:
         result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
         result = sorted(result, key=lambda item:item[0])
@@ -213,9 +228,191 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
 
         for idx in range(len(result)):
             print("S: ", unlabeled_dataset[result[idx][1]])
+            print("H: ", result[idx][2])
             print("T: ", oracle[result[idx][1]])
             print("V: ", result[idx][0])
             print("I: ", args.input, args.reference, result[idx][1])
+
+
+def supvised_learning_modify(args):
+    f = open(args.unlabeled_dataset, 'r')
+    unlabeled_dataset = f.read().split("\n")[:-1]
+    f.close()
+
+    src_labeled_dataset, tgt_labeled_dataset = args.labeled_dataset.split(",")
+    labeled_dataset = []
+    f = open(src_labeled_dataset, 'r')
+    labeled_dataset.append(f.read().split("\n")[:-1])
+    f.close()
+
+    f = open(tgt_labeled_dataset, 'r')
+    labeled_dataset.append(f.read().split("\n")[:-1])
+    f.close()
+
+    # Read oracle
+    f = open(args.oracle, "r")
+    oracle = f.read().split("\n")[:-1]
+    assert len(oracle) == len(unlabeled_dataset)
+
+    # Read active out
+    f = open(args.active_out, "r")
+    active_out = f.read().split("\n")[:-1]
+
+    # Sort active_out
+    assert len(active_out) % 4 == 0
+    assert len(active_out) / 4 == len(oracle)
+    active_out = [[active_out[i], active_out[i+1], float(active_out[i+2].split(' ')[-1]), active_out[i+3]] for i in range(0, len(active_out), 4)]
+    random.shuffle(active_out)
+    active_out = sorted(active_out, key=lambda item: item[2])
+
+    # Change datasets
+    indices = np.arange(len(active_out))
+    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S:  "):])).split(' ')) for item in active_out])
+    include = np.cumsum(lengths) <= args.tok_budget
+    not_include = (1 - include).astype('bool')
+    include = indices[include]
+    not_include = indices[not_include]
+    
+    for idx in include:
+        labeled_dataset[0].append(active_out[idx][0][len("S:  "):])
+        labeled_dataset[1].append(active_out[idx][1][len("T:  "):])
+    
+    unlabeled_dataset = []
+    oracle = []
+    for idx in not_include:
+        unlabeled_dataset.append(active_out[idx][0][len("S:  "):])
+        oracle.append(active_out[idx][1][len("T:  "):])
+
+    combined = list(zip(unlabeled_dataset, oracle))
+    random.shuffle(combined)
+
+    unlabeled_dataset[:], oracle[:] = zip(*combined)
+    
+    # Store new labeled, unlabeled, oracle dataset
+    f = open(args.output_unlabeled_dataset, 'w')
+    f.write("\n".join(unlabeled_dataset) + "\n")
+    f.close()
+
+    output_src_labeled_dataset, output_tgt_labeled_dataset = args.output_labeled_dataset.split(",")
+    f = open(output_src_labeled_dataset, 'w')
+    f.write("\n".join(labeled_dataset[0]) + "\n")
+    f.close()
+
+    f = open(output_tgt_labeled_dataset, 'w')
+    f.write("\n".join(labeled_dataset[1]) + "\n")
+    f.close()
+
+    f = open(args.output_oracle, 'w')
+    f.write("\n".join(oracle) + "\n")
+    f.close()
+
+
+def back_translation_modify(args):
+    f = open(args.unlabeled_dataset, 'r')
+    unlabeled_dataset = f.read().split("\n")[:-1]
+    f.close()
+
+    src_labeled_dataset, tgt_labeled_dataset = args.labeled_dataset.split(",")
+    labeled_dataset = []
+    f = open(src_labeled_dataset, 'r')
+    labeled_dataset.append(f.read().split("\n")[:-1])
+    f.close()
+
+    f = open(tgt_labeled_dataset, 'r')
+    labeled_dataset.append(f.read().split("\n")[:-1])
+    f.close()
+
+    reverse_new_queries_src, reverse_new_queries_tgt = args.reverse_new_queries.split(',')
+    if os.path.exists(reverse_new_queries_src) and os.path.exists(reverse_new_queries_tgt):
+        f = open(reverse_new_queries_src, 'r')
+        labeled_dataset[0].extend(f.read().split("\n")[:-1])
+        f.close()
+
+        f = open(reverse_new_queries_tgt, 'r')
+        labeled_dataset[1].extend(f.read().split("\n")[:-1])
+        f.close()
+
+    # Read oracle
+    f = open(args.oracle, "r")
+    oracle = f.read().split("\n")[:-1]
+    assert len(oracle) == len(unlabeled_dataset)
+
+    # Read active out
+    f = open(args.active_out, "r")
+    active_out = f.read().split("\n")[:-1]
+
+    # Sort active_out
+    assert len(active_out) % 5 == 0
+    assert len(active_out) / 5 == len(oracle)
+    active_out = [[active_out[i], active_out[i+1], active_out[i+2], float(active_out[i+3].split(' ')[-1]), active_out[i+4]] for i in range(0, len(active_out), 5)]
+    active_out = sorted(active_out, key=lambda item: item[3])
+    indices = np.arange(len(active_out))
+    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S:  "):])).split(' ')) for item in active_out])
+    include1 = np.cumsum(lengths) <= args.tok_budget
+    
+    # Change datasets
+    indices = np.arange(len(active_out))
+    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S:  "):])).split(' ')) for item in active_out])
+    include1 = np.cumsum(lengths) <= args.tok_budget
+    include2 = np.cumsum(np.flip(lengths, 0)) <= args.tok_budget
+    include2 = np.flip(include2, 0)
+    include = np.logical_or(include1, include2)
+
+    print(np.sum(include1))
+    print(np.sum(include2))
+    print(np.sum(include))
+
+    assert np.sum(include1) + np.sum(include2) == np.sum(include)
+    not_include = (1 - include).astype('bool')
+    include = indices[include]
+    not_include = indices[not_include]
+    
+    for idx in indices[include1]:
+        labeled_dataset[0].append(active_out[idx][0][len("S:  "):])
+        labeled_dataset[1].append(active_out[idx][2][len("T:  "):])
+
+    for idx in indices[include2]:
+        labeled_dataset[0].append(active_out[idx][0][len("S:  "):])
+        labeled_dataset[1].append(active_out[idx][1][len("H:  "):])
+    
+    unlabeled_dataset = []
+    oracle = []
+    for idx in not_include:
+        unlabeled_dataset.append(active_out[idx][0][len("S:  "):])
+        oracle.append(active_out[idx][2][len("T:  "):])
+
+    combined = list(zip(unlabeled_dataset, oracle))
+    random.shuffle(combined)
+
+    unlabeled_dataset[:], oracle[:] = zip(*combined)
+    
+    # Store new labeled, unlabeled, oracle dataset
+    f = open(args.output_unlabeled_dataset, 'w')
+    f.write("\n".join(unlabeled_dataset) + "\n")
+    f.close()
+
+    output_src_labeled_dataset, output_tgt_labeled_dataset = args.output_labeled_dataset.split(",")
+    f = open(output_src_labeled_dataset, 'w')
+    f.write("\n".join(labeled_dataset[0]) + "\n")
+    f.close()
+
+    f = open(output_tgt_labeled_dataset, 'w')
+    f.write("\n".join(labeled_dataset[1]) + "\n")
+    f.close()
+
+    f = open(args.output_oracle, 'w')
+    f.write("\n".join(oracle) + "\n")
+    f.close()
+
+    output_new_queries_src, output_new_queries_tgt = args.output_new_queries.split(',')
+    
+    f = open(output_new_queries_src, 'w')
+    f.write("\n".join([active_out[idx][0][len("S:  "):] for idx in range(len(include1)) if include1[idx]]) + '\n')
+    f.close()
+    
+    f = open(output_new_queries_tgt, 'w')
+    f.write("\n".join([active_out[idx][2][len("T:  "):] for idx in range(len(include1)) if include1[idx]]) + '\n')
+    f.close()
 
 
 def main():
@@ -299,6 +496,15 @@ def main():
     parser_modify.add_argument('-AO', '--active_out', type=str,
             help="path to active function output"
             )
+    parser_modify.add_argument('-bt', '--back_translation', action='store_true',
+            help="For back translation or for supervised learning"
+            )
+    parser_modify.add_argument('-rnq', '--reverse_new_queries', type=str, default=None,
+            help="For L1 to L2 learning, add new labeled data obtained during L2 to L1 learning"
+            )
+    parser_modify.add_argument('-onq', '--output_new_queries', type=str, 
+            help="Path to store new queries in this round, splited by comma"
+            )
     args = parser.parse_args()
 
     args.mode = "score" if hasattr(args, "active_func") else "modify"
@@ -317,77 +523,14 @@ def main():
         f.close()
         query_instances(args, text, ref_text, args.active_func)
 
-    else:
+    elif args.mode == "modify":
         # Read labeled and unlabeled datasets
-        f = open(args.unlabeled_dataset, 'r')
-        unlabeled_dataset = f.read().split("\n")[:-1]
-        f.close()
-
-        src_labeled_dataset, tgt_labeled_dataset = args.labeled_dataset.split(",")
-        labeled_dataset = []
-        f = open(src_labeled_dataset, 'r')
-        labeled_dataset.append(f.read().split("\n")[:-1])
-        f.close()
-
-        f = open(tgt_labeled_dataset, 'r')
-        labeled_dataset.append(f.read().split("\n")[:-1])
-        f.close()
-
-        # Read oracle
-        f = open(args.oracle, "r")
-        oracle = f.read().split("\n")[:-1]
-        assert len(oracle) == len(unlabeled_dataset)
-
-        # Read active out
-        f = open(args.active_out, "r")
-        active_out = f.read().split("\n")[:-1]
-
-        # Sort active_out
-        assert len(active_out) % 4 == 0
-        assert len(active_out) / 4 == len(oracle)
-        active_out = [[active_out[i], active_out[i+1], float(active_out[i+2].split(' ')[-1]), active_out[i+3]] for i in range(0, len(active_out), 4)]
-        active_out = sorted(active_out, key=lambda item: item[2])
-
-        # Change datasets
-        indices = np.arange(len(active_out))
-        lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S: "):])).split(' ')) for item in active_out])
-        include = np.cumsum(lengths) <= args.tok_budget
-        not_include = (1 - include).astype('bool')
-        include = indices[include]
-        not_include = indices[not_include]
-        
-        for idx in include:
-            labeled_dataset[0].append(active_out[idx][0][len("S: "):])
-            labeled_dataset[1].append(active_out[idx][1][len("T: "):])
-        
-        unlabeled_dataset = []
-        oracle = []
-        for idx in not_include:
-            unlabeled_dataset.append(active_out[idx][0][len("S: "):])
-            oracle.append(active_out[idx][1][len("T: "):])
-
-        combined = list(zip(unlabeled_dataset, oracle))
-        random.shuffle(combined)
-
-        unlabeled_dataset[:], oracle[:] = zip(*combined)
-        
-        # Store new labeled, unlabeled, oracle dataset
-        f = open(args.output_unlabeled_dataset, 'w')
-        f.write("\n".join(unlabeled_dataset) + "\n")
-        f.close()
-
-        output_src_labeled_dataset, output_tgt_labeled_dataset = args.output_labeled_dataset.split(",")
-        f = open(output_src_labeled_dataset, 'w')
-        f.write("\n".join(labeled_dataset[0]) + "\n")
-        f.close()
-
-        f = open(output_tgt_labeled_dataset, 'w')
-        f.write("\n".join(labeled_dataset[1]) + "\n")
-        f.close()
-
-        f = open(args.output_oracle, 'w')
-        f.write("\n".join(oracle) + "\n")
-        f.close()
+        if args.back_translation:
+            back_translation_modify(args)
+        else:
+            supvised_learning_modify(args)
+    else:
+        raise("Invalid mode! Only two modes, score or modify")
 
 
 if __name__ == "__main__":
