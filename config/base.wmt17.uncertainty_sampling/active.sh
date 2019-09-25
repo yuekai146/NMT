@@ -3,8 +3,9 @@ ACTIVE_OUT=$ACTIVE/test_active.out_
 U=$ACTIVE/unlabeled_
 L=$ACTIVE/labeled_
 ORACLE=$ACTIVE/oracle_
-ACTIVE_FUNC=random
+ACTIVE_FUNC=lc
 N_ROUNDS=11
+START_ROUND=0
 NGPUS=8
 TOK_BUDGET=1600000
 SRC=de
@@ -16,47 +17,23 @@ CLEAN=$SCRIPTS/training/clean-corpus-n.perl
 FAIRSEQ_PATH=/data/fairseq
 BPEROOT=/data/fastBPE
 
-ORIG_SRC=../../data/de-en/wmt17_de_en/train.de
-ORIG_TGT=../../data/de-en/wmt17_de_en/train.en
+INIT_SRC=../base.wmt17.active_base/result/random/active_data/labeled_1.$SRC
+INIT_TGT=../base.wmt17.active_base/result/random/active_data/labeled_1.$TGT
+INIT_UNLABELED=../base.wmt17.active_base/result/random/active_data/unlabeled_1
+INIT_ORACLE=../base.wmt17.active_base/result/random/active_data/oracle_1
 TEST_INPUT=../../data/de-en/wmt17_de_en/test.de
 TEST_REF=../../data/de-en/wmt17_de_en/test.en
 
 function main () {
 	# Initialize labeled and unlabeled dataset
 	mkdir -p $ACTIVE
-	cp $ORIG_SRC ${U}0
-	cp $ORIG_TGT ${ORACLE}0
-	touch ${L}0.$SRC ${L}0.$TGT
+	cp $INIT_SRC ${L}1.$SRC
+	cp $INIT_TGT ${L}1.$TGT
+	cp $INIT_UNLABELED ${U}1
+	cp $INIT_ORACLE ${ORACLE}1
 
-	for i in $( seq 0 $N_ROUNDS )
+	for i in $( seq $START_ROUND $N_ROUNDS )
 	do	
-		# Do active learning
-		cd active_data
-		num_U=$(cat unlabeled_${i} | wc -l)
-		num_chunk=$(($num_U / $NGPUS + 1))
-		split -l $num_chunk unlabeled_$i unlabeled_${i}_ -da 1
-		split -l $num_chunk oracle_$i oracle_${i}_ -da 1
-		cd ..	
-
-		for j in $( seq 0 $((NGPUS - 1)) )
-		do
-			echo "CUDA_VISIBLE_DEVICES=$j python3 active.py score -a $ACTIVE_FUNC \
-				-i ${U}${i}_$j -ref ${ORACLE}${i}_$j \
-				-ckpt checkpoints/$((i+1))/checkpoint_best_ppl.pth \
-				--max_batch_size 0 \
-				--tokens_per_batch 16384 > test_active.out_${i}_${j}" >> parallel_active.sh
-		done
-		parallel -j $NGPUS < parallel_active.sh
-		rm parallel_active.sh
-		mv test_active.out_${i}_? active_data/
-		cat active_data/test_active.out_${i}_? >> active_data/test_active.out_$i
-		python3 active.py modify -U $U$i -L $L$i.$SRC,$L$i.$TGT --oracle $ORACLE$i -tb $TOK_BUDGET \
-			-OU $U$((i+1)) -OL $L$((i+1)).$SRC,$L$((i+1)).$TGT \
-			-OO $ORACLE$((i+1)) -AO $ACTIVE_OUT$i 
-		cd active_data
-		rm test_active.out*
-		rm *_${i}_?
-		cd ..
 
 		# Train network on new labeled dataset
 		export NGPUS=8
@@ -90,7 +67,40 @@ function main () {
 		cat checkpoints/$((i+1))/sys.out | perl -ple 's{(\S)-(\S)}{$1 ##AT##-##AT## $2}g' > checkpoints/$((i+1))/generate.sys
 		cat checkpoints/$((i+1))/ref.out | perl -ple 's{(\S)-(\S)}{$1 ##AT##-##AT## $2}g' > checkpoints/$((i+1))/generate.ref
 
-		python3 $FAIRSEQ_PATH/score.py --sys checkpoints/$((i+1))/generate.sys --ref checkpoints/$((i+1))/generate.ref > checkpoints/$((i+1))/bleu.txt
+		python3 $FAIRSEQ_PATH/score.py --sys checkpoints/$((i+1))/generate.sys \
+			--ref checkpoints/$((i+1))/generate.ref > checkpoints/$((i+1))/bleu.txt
+		
+		# Do active learning
+		if [ $i -ne $N_ROUNDS ]; then
+			cd active_data
+			num_U=$(cat unlabeled_$((i+1)) | wc -l)
+			num_chunk=$(($num_U / $NGPUS + 1))
+			split -l $num_chunk unlabeled_$((i+1)) unlabeled_$((i+1))_ -da 1
+			split -l $num_chunk oracle_$((i+1)) oracle_$((i+1))_ -da 1
+			cd ..	
+
+			for j in $( seq 0 $((NGPUS - 1)) )
+			do
+				echo "CUDA_VISIBLE_DEVICES=$j python3 active.py score -a $ACTIVE_FUNC \
+					-i ${U}$((i+1))_$j -ref ${ORACLE}$((i+1))_$j \
+					-ckpt checkpoints/$((i+1))/checkpoint_best_ppl.pth \
+					--max_batch_size 0 \
+					--tokens_per_batch 16384 > test_active.out_$((i+1))_${j}" >> parallel_active.sh
+			done
+			parallel -j $NGPUS < parallel_active.sh
+			rm parallel_active.sh
+			mv test_active.out_$((i+1))_? active_data/
+			cat active_data/test_active.out_$((i+1))_? >> active_data/test_active.out_$((i+1))
+			python3 active.py modify -U $U$((i+1)) \
+				-L $L$((i+1)).$SRC,$L$((i+1)).$TGT \
+				--oracle $ORACLE$((i+1)) -tb $TOK_BUDGET \
+				-OU $U$((i+2)) -OL $L$((i+2)).$SRC,$L$((i+2)).$TGT \
+				-OO $ORACLE$((i+2)) -AO $ACTIVE_OUT$((i+1)) 
+			cd active_data
+			rm test_active.out*
+			rm *_$((i+1))_?
+			cd ..
+		fi
 		
 	
 	done

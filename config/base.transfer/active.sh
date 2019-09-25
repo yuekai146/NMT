@@ -4,7 +4,7 @@ U=$ACTIVE/unlabeled_
 L=$ACTIVE/labeled_
 ORACLE=$ACTIVE/oracle_
 ACTIVE_FUNC=random
-START_ROUND=2
+START_ROUND=0
 N_ROUNDS=11
 NGPUS=8
 TOK_BUDGET=1600000
@@ -17,10 +17,10 @@ CLEAN=$SCRIPTS/training/clean-corpus-n.perl
 FAIRSEQ_PATH=/data/fairseq
 BPEROOT=/data/fastBPE
 
-ORIG_SRC=../../data/de-en/wmt17_de_en/train.de
-ORIG_TGT=../../data/de-en/wmt17_de_en/train.en
-TEST_INPUT=../../data/de-en/wmt17_de_en/test.de
-TEST_REF=../../data/de-en/wmt17_de_en/test.en
+ORIG_SRC=../../data/defr-en/train.de-en.de
+ORIG_TGT=../../data/defr-en/train.de-en.en
+TEST_INPUT=../../data/defr-en/test.de-en.de
+TEST_REF=../../data/defr-en/test.de-en.en
 
 function main () {
 	# Initialize labeled and unlabeled dataset

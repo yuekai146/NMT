@@ -22,15 +22,15 @@ class Config:
     
     # data paths
     DATA_PATH="../../data/defr-en"
-    SRC_RAW_TRAIN_PATH = DATA_PATH + "/train.fr-en.fr"
-    TGT_RAW_TRAIN_PATH = DATA_PATH + "/train.fr-en.en"
-    SRC_RAW_VALID_PATH = DATA_PATH + "/valid.fr-en.fr"
-    TGT_RAW_VALID_PATH = DATA_PATH + "/valid.fr-en.en"
+    SRC_RAW_TRAIN_PATH = DATA_PATH + "/train.de-en.de"
+    TGT_RAW_TRAIN_PATH = DATA_PATH + "/train.de-en.en"
+    SRC_RAW_VALID_PATH = DATA_PATH + "/valid.de-en.de"
+    TGT_RAW_VALID_PATH = DATA_PATH + "/valid.de-en.en"
     if share_all_embeddings:
         SRC_VOCAB_PATH = DATA_PATH + "/vocab.total"
         TGT_VOCAB_PATH = DATA_PATH + "/vocab.total"
     else:
-        SRC_VOCAB_PATH = DATA_PATH + "/vocab.fr"
+        SRC_VOCAB_PATH = DATA_PATH + "/vocab.de"
         TGT_VOCAB_PATH = DATA_PATH + "/vocab.en"
 
     data_bin = "data_bin/"
@@ -45,7 +45,7 @@ class Config:
     
     if share_all_embeddings:
         assert src_n_vocab == tgt_n_vocab
-    SRC_LAN = "fr"
+    SRC_LAN = "de"
     TGT_LAN = "en"
     BATCH_SIZE = 128
     tokens_per_batch = 4096 # if tokens_per_batch > 0, ignore BATCH_SIZE
@@ -74,8 +74,8 @@ class Config:
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
     epoch_size = 150
-    continue_path = None
-    dump_path = "checkpoints/"
+    continue_path = "checkpoints/init/checkpoint_best_ppl.pth"
+    dump_path = "checkpoints"
     reload_network_only = True
     clip_grad_norm = 0.0
     accumulate_gradients = 1

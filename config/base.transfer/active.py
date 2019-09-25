@@ -346,6 +346,7 @@ def main():
         assert len(active_out) % 4 == 0
         assert len(active_out) / 4 == len(oracle)
         active_out = [[active_out[i], active_out[i+1], float(active_out[i+2].split(' ')[-1]), active_out[i+3]] for i in range(0, len(active_out), 4)]
+        random.shuffle(active_out)
         active_out = sorted(active_out, key=lambda item: item[2])
 
         # Change datasets

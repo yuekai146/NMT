@@ -12,3 +12,5 @@ config/*/data_bin
 config/*/active_data
 config/*/*.txt
 data/*
+config/base.fp16.incremental_decode.uncertainty_sampling.*/*/
+config/*/result/
