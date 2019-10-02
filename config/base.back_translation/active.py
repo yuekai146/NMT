@@ -19,7 +19,7 @@ def gen_batch2str(generated, gen_len, tgt_vocab):
     for i, l in enumerate(generated):
         l = l[:gen_len[i]]
         sys_sent = " ".join([tgt_vocab.itos[tok] for tok in l])
-        sys_sent = remove_special_tok(remove_bpe(sys_sent))
+        sys_sent = remove_special_tok(sys_sent)
         translated.append(sys_sent)
     return translated
 
@@ -184,11 +184,11 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
         indices = [item[1] for item in result]
         indices = np.array(indices).astype('int')
         for idx in indices:
-            print("S: ", unlabeled_dataset[idx])
-            print("H: ", result[idx][2])
-            print("T: ", oracle[idx])
-            print("V: ", result[idx][0])
-            print("I: ", args.input, args.reference, idx)
+            print("S:", unlabeled_dataset[idx])
+            print("H:", result[idx][2])
+            print("T:", oracle[idx])
+            print("V:", result[idx][0])
+            print("I:", args.input, args.reference, idx)
     elif active_func == "longest":
         result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
         result = [(
@@ -199,11 +199,11 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
         indices = [item[1] for item in result]
         indices = np.array(indices).astype('int')
         for idx in indices:
-            print("S: ", unlabeled_dataset[idx])
-            print("H: ", result[idx][2])
-            print("T: ", oracle[idx])
-            print("V: ", result[idx][0])
-            print("I: ", args.input, args.reference, idx)
+            print("S:", unlabeled_dataset[idx])
+            print("H:", result[idx][2])
+            print("T:", oracle[idx])
+            print("V:", -result[idx][0])
+            print("I:", args.input, args.reference, idx)
     elif active_func == "shortest":
         result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
         result = [(
@@ -214,11 +214,11 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
         indices = [item[1] for item in result]
         indices = np.array(indices).astype('int')
         for idx in indices:
-            print("S: ", unlabeled_dataset[idx])
-            print("H: ", result[idx][2])
-            print("T: ", oracle[idx])
-            print("V: 0.0")
-            print("I: ", args.input, args.reference, idx)
+            print("S:", unlabeled_dataset[idx])
+            print("H:", result[idx][2])
+            print("T:", oracle[idx])
+            print("V:", result[idx][0])
+            print("I:", args.input, args.reference, idx)
         indices = indices[np.argsort(lengths[indices])]
     elif active_func in ["lc", "margin", "te", "tte"]:
         result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
@@ -227,11 +227,11 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
         indices = np.array(indices).astype('int')
 
         for idx in range(len(result)):
-            print("S: ", unlabeled_dataset[result[idx][1]])
-            print("H: ", result[idx][2])
-            print("T: ", oracle[result[idx][1]])
-            print("V: ", result[idx][0])
-            print("I: ", args.input, args.reference, result[idx][1])
+            print("S:", unlabeled_dataset[result[idx][1]])
+            print("H:", result[idx][2])
+            print("T:", oracle[result[idx][1]])
+            print("V:", result[idx][0])
+            print("I:", args.input, args.reference, result[idx][1])
 
 
 def supvised_learning_modify(args):
@@ -267,21 +267,21 @@ def supvised_learning_modify(args):
 
     # Change datasets
     indices = np.arange(len(active_out))
-    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S:  "):])).split(' ')) for item in active_out])
+    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S: "):])).split(' ')) for item in active_out])
     include = np.cumsum(lengths) <= args.tok_budget
     not_include = (1 - include).astype('bool')
     include = indices[include]
     not_include = indices[not_include]
     
     for idx in include:
-        labeled_dataset[0].append(active_out[idx][0][len("S:  "):])
-        labeled_dataset[1].append(active_out[idx][1][len("T:  "):])
+        labeled_dataset[0].append(active_out[idx][0][len("S: "):].strip())
+        labeled_dataset[1].append(active_out[idx][1][len("T: "):].strip())
     
     unlabeled_dataset = []
     oracle = []
     for idx in not_include:
-        unlabeled_dataset.append(active_out[idx][0][len("S:  "):])
-        oracle.append(active_out[idx][1][len("T:  "):])
+        unlabeled_dataset.append(active_out[idx][0][len("S: "):].strip())
+        oracle.append(active_out[idx][1][len("T: "):].strip())
 
     combined = list(zip(unlabeled_dataset, oracle))
     random.shuffle(combined)
@@ -346,40 +346,25 @@ def back_translation_modify(args):
     assert len(active_out) / 5 == len(oracle)
     active_out = [[active_out[i], active_out[i+1], active_out[i+2], float(active_out[i+3].split(' ')[-1]), active_out[i+4]] for i in range(0, len(active_out), 5)]
     active_out = sorted(active_out, key=lambda item: item[3])
-    indices = np.arange(len(active_out))
-    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S:  "):])).split(' ')) for item in active_out])
-    include1 = np.cumsum(lengths) <= args.tok_budget
     
     # Change datasets
     indices = np.arange(len(active_out))
-    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S:  "):])).split(' ')) for item in active_out])
-    include1 = np.cumsum(lengths) <= args.tok_budget
-    include2 = np.cumsum(np.flip(lengths, 0)) <= args.tok_budget
-    include2 = np.flip(include2, 0)
-    include = np.logical_or(include1, include2)
+    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S: "):])).split(' ')) for item in active_out])
+    include_oracle = np.cumsum(lengths) <= args.tok_budget
+    include_pseudo = np.cumsum(np.flip(lengths, 0)) <= args.back_translation_tok_budget
+    include_pseudo = np.flip(include_pseudo, 0)
 
-    print(np.sum(include1))
-    print(np.sum(include2))
-    print(np.sum(include))
+    for idx in indices[include_oracle]:
+        labeled_dataset[0].append(active_out[idx][0][len("S: "):].strip())
+        labeled_dataset[1].append(active_out[idx][2][len("T: "):].strip())
 
-    assert np.sum(include1) + np.sum(include2) == np.sum(include)
-    not_include = (1 - include).astype('bool')
-    include = indices[include]
-    not_include = indices[not_include]
-    
-    for idx in indices[include1]:
-        labeled_dataset[0].append(active_out[idx][0][len("S:  "):])
-        labeled_dataset[1].append(active_out[idx][2][len("T:  "):])
-
-    for idx in indices[include2]:
-        labeled_dataset[0].append(active_out[idx][0][len("S:  "):])
-        labeled_dataset[1].append(active_out[idx][1][len("H:  "):])
-    
     unlabeled_dataset = []
     oracle = []
+    not_include = (1 - include_oracle).astype('bool')
+    not_include = indices[not_include]
     for idx in not_include:
-        unlabeled_dataset.append(active_out[idx][0][len("S:  "):])
-        oracle.append(active_out[idx][2][len("T:  "):])
+        unlabeled_dataset.append(active_out[idx][0][len("S: "):].strip())
+        oracle.append(active_out[idx][2][len("T: "):].strip())
 
     combined = list(zip(unlabeled_dataset, oracle))
     random.shuffle(combined)
@@ -407,18 +392,32 @@ def back_translation_modify(args):
     output_new_queries_src, output_new_queries_tgt = args.output_new_queries.split(',')
     
     f = open(output_new_queries_src, 'w')
-    f.write("\n".join([active_out[idx][0][len("S:  "):] for idx in range(len(include1)) if include1[idx]]) + '\n')
+    f.write("\n".join([active_out[idx][0][len("S: "):].strip() for idx in range(len(include_oracle)) if include_oracle[idx]]) + '\n')
     f.close()
     
     f = open(output_new_queries_tgt, 'w')
-    f.write("\n".join([active_out[idx][2][len("T:  "):] for idx in range(len(include1)) if include1[idx]]) + '\n')
+    f.write("\n".join([active_out[idx][2][len("T: "):].strip() for idx in range(len(include_oracle)) if include_oracle[idx]]) + '\n')
+    f.close()
+
+    output_train_src, output_train_tgt = args.output_train.split(',')
+    labeled_dataset[0].extend([active_out[idx][0][len("S: "):].strip() for idx in range(len(include_pseudo)) if include_pseudo[idx]])
+    labeled_dataset[1].extend([active_out[idx][1][len("H: "):].strip() for idx in range(len(include_pseudo)) if include_pseudo[idx]])
+    ots = labeled_dataset[0]
+    ott = labeled_dataset[1]
+
+    f = open(output_train_src, 'w')
+    f.write("\n".join(ots) + "\n")
+    f.close()
+
+    f = open(output_train_tgt, 'w')
+    f.write("\n".join(ott) + "\n")
     f.close()
 
 
 def main():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(help='two modes, score or modify')
-    
+
     # Add argument for score mode
     parser_score = subparsers.add_parser(
             'score', help='Get active function scores for each unlabeled sentence'
@@ -482,6 +481,10 @@ def main():
             help="Token budget", required=True
             )
     parser_modify.add_argument(
+            '-bttb', '--back_translation_tok_budget', type=int, default=None,
+            help="Back translation token budget, if None, the same as tok_budget"
+            )
+    parser_modify.add_argument(
             "-OU", "--output_unlabeled_dataset", type=str,
             help="path to store new unlabeled dataset", required=True
             )
@@ -503,7 +506,10 @@ def main():
             help="For L1 to L2 learning, add new labeled data obtained during L2 to L1 learning"
             )
     parser_modify.add_argument('-onq', '--output_new_queries', type=str, 
-            help="Path to store new queries in this round, splited by comma"
+            help="Path to store new queries in this round, separated by comma"
+            )
+    parser_modify.add_argument('-OT', '--output_train', type=str, default=None,
+            help="Path to store new generated train data, separated by comma"
             )
     args = parser.parse_args()
 
@@ -524,6 +530,8 @@ def main():
         query_instances(args, text, ref_text, args.active_func)
 
     elif args.mode == "modify":
+        if args.back_translation_tok_budget is None:
+            args.back_translation_tok_budget = args.tok_budget
         # Read labeled and unlabeled datasets
         if args.back_translation:
             back_translation_modify(args)
