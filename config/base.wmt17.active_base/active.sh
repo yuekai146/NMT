@@ -3,8 +3,6 @@ ACTIVE_OUT=$ACTIVE/test_active.out_
 U=$ACTIVE/unlabeled_
 L=$ACTIVE/labeled_
 ORACLE=$ACTIVE/oracle_
-ACTIVE_FUNC=random
-START_ROUND=0
 N_ROUNDS=11
 NGPUS=8
 TOK_BUDGET=1600000
@@ -22,7 +20,10 @@ ORIG_TGT=../../data/de-en/wmt17_de_en/train.en
 TEST_INPUT=../../data/de-en/wmt17_de_en/test.de
 TEST_REF=../../data/de-en/wmt17_de_en/test.en
 
-function main () {
+function Active_NMT () {
+	local ACTIVE_FUNC=$1
+	local START_ROUND=$2
+	
 	# Initialize labeled and unlabeled dataset
 	mkdir -p $ACTIVE
 	cp $ORIG_SRC ${U}0
@@ -96,5 +97,17 @@ function main () {
 	
 	done
 }
+
+
+function main () {
+	mkdir -p ./result
+	for ACTIVE_FUNC in longest shortest; do
+		Active_NMT $ACTIVE_FUNC 0
+		mkdir -p ./result/$ACTIVE_FUNC
+		mv checkpoints active_data ./result/$ACTIVE_FUNC/
+		rm -rf data_bin
+	done
+}
+
 
 main

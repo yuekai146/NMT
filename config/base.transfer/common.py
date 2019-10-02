@@ -74,7 +74,7 @@ class Config:
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
     epoch_size = 150
-    continue_path = "checkpoints/init/checkpoint_best_ppl.pth"
+    continue_path = "init/checkpoint_best_ppl.pth"
     dump_path = "checkpoints"
     reload_network_only = True
     clip_grad_norm = 0.0
