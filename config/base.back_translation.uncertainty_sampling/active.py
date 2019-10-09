@@ -392,8 +392,8 @@ def back_translation_modify(args):
     f.close()
 
     output_train_src, output_train_tgt = args.output_train.split(',')
-    include_pseudo = np.cumsum(np.flip(lengths)) <= args.back_translation_tok_budget
-    include_pseudo = np.flip(include_pseudo)
+    include_pseudo = np.cumsum(lengths) <= ( args.tok_budget + args.back_translation_tok_budget )
+    include_pseudo = np.logical_xor(include_pseudo, include_oracle)
     include_pseudo = indices[include_pseudo]
     labeled_dataset[0].extend([active_out[idx][0][len("S: "):].strip() for idx in include_pseudo])
     labeled_dataset[1].extend([active_out[idx][1][len("H: "):].strip() for idx in include_pseudo])

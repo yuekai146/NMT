@@ -151,8 +151,7 @@ function Active_Learn () {
 		-AO $AO \
 		-bt \
 		-onq $onq \
-		-OT $OT \
-		-bttb $((i*TOK_BUDGET + 9 * TOK_BUDGET))
+		-OT $OT
 	cd active_data/$SRC-$TGT
 	rm test_active.$SRC-$TGT.out*
 	rm -rf *_${i}_?
@@ -173,7 +172,7 @@ function BT () {
 	if [ $START_ROUND -eq 1 ]; then
 		Init_Active_BT $LAN1 $LAN2
 		Init_Active_BT $LAN2 $LAN1
-		cp -r ../../data/de-en/wmt17_de_en/BT_init_ckpt checkpoints
+		cp  -r ../../data/de-en/wmt17_de_en/BT_init_ckpt checkpoints
 		START_ROUND=2
 	fi
 

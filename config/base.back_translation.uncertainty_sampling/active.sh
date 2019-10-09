@@ -173,7 +173,7 @@ function BT () {
 	if [ $START_ROUND -eq 1 ]; then
 		Init_Active_BT $LAN1 $LAN2
 		Init_Active_BT $LAN2 $LAN1
-		cp -r ../../data/de-en/wmt17_de_en/BT_init_ckpt checkpoints
+		cp -r ../../data/de-en/wmt17_de_en/BT_init_ckpt checkpoints	
 		START_ROUND=2
 	fi
 
@@ -202,7 +202,7 @@ function BT () {
 
 
 function main () {
-	for ACTIVE_FUNC in random longest shortest; do
+	for ACTIVE_FUNC in lc margin te tte; do
 		BT $ACTIVE_FUNC 
 		mkdir -p result/$ACTIVE_FUNC
 		mv active_data checkpoints result/$ACTIVE_FUNC/
