@@ -3,7 +3,7 @@ import argparse
 import numpy as np
 import math
 
-#punc = [".", ",", "?", "!", "'", "<", ">", ":", ";", "(", ")", "{", "}", "[", "]", "-"] 
+punc = [".", ",", "?", "!", "'", "<", ">", ":", ";", "(", ")", "{", "}", "[", "]", "-"]
 
 def query_instances(labeled_dataset, unlabeled_dataset, active_func="random", tok_budget=None):
     assert active_func in ["random", "longest", "shortest", "dden", "div"]
@@ -22,7 +22,8 @@ def query_instances(labeled_dataset, unlabeled_dataset, active_func="random", to
     elif active_func == "shortest":
         indices = indices[np.argsort(lengths[indices])]
     elif active_func == "dden":
-        lamb = 1
+        lamb1 = 1
+        lamb2 = 3
         p_u = {}
         total_num_without_punc = 0
         for s in unlabeled_dataset:
@@ -40,7 +41,7 @@ def query_instances(labeled_dataset, unlabeled_dataset, active_func="random", to
         #f.close()
 
         for token in p_u.keys():
-            p_u[token] /= total_num
+            p_u[token] /= total_num_without_punc
         sum_for_p = 0
         for token in p_u.keys():
             sum_for_p += p_u[token]
@@ -64,15 +65,52 @@ def query_instances(labeled_dataset, unlabeled_dataset, active_func="random", to
             for token in sentence:
                 if token not in punc:
                     if token in count_l.keys():
-                        sum_for_sentence += p_u[token] * math.exp(-lamb * count_l[token])
+                        sum_for_sentence += p_u[token] * math.exp(-lamb1 * count_l[token])
                     else:
                         sum_for_sentence += p_u[token]
                     len_for_sentence += 1
             if len_for_sentence != 0:
                 sum_for_sentence /= len_for_sentence
             dden.append(sum_for_sentence)
-        ddens = np.array(dden)
-        indices = indices[np.argsort(ddens)]
+
+        unlabeled_with_index = []
+        for i in range(len(unlabeled_dataset)):
+            unlabeled_with_index.append((dden[i], i))
+        unlabeled_with_index.sort(key = lambda x:x[0], reverse = True)
+
+        count_batch = {}
+        dden_new = []
+        for _, i in unlabeled_with_index:
+            sentence = unlabeled_dataset[i].split()
+            len_for_sentence = 0
+            sum_for_sentence = 0
+            for token in sentence:
+                if token not in punc:
+                    p_tmp = p_u[token]
+                    if token in count_batch.keys():
+                        p_tmp = 0
+                        p_tmp *= math.exp(-lamb2 * count_batch[token])
+                    if token in count_l.keys():
+                        p_tmp *= math.exp(-lamb1 * count_l[token])
+                    sum_for_sentence += p_tmp
+                    len_for_sentence += 1
+            for token in sentence:
+                if token not in punc:
+                    if token in count_batch.keys():
+                        count_batch[token] += 1
+                    else:
+                        count_batch[token] = 1
+            if len_for_sentence != 0:
+                sum_for_sentence /= len_for_sentence
+            dden_new.append((sum_for_sentence, i))
+
+        dden_new.sort(key = lambda x:x[1])
+        dden_sort = []
+        for dden_num, _ in dden_new:
+            dden_sort.append(dden_num)
+
+        ddens = np.array(dden_sort)
+        indices = indices[np.argsort(-ddens)]
 
     elif active_func == "div":
         tokens_l = []
