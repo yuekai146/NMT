@@ -202,12 +202,18 @@ function BT () {
 
 
 function main () {
-	for ACTIVE_FUNC in random longest shortest; do
-		BT $ACTIVE_FUNC 
-		mkdir -p result/$ACTIVE_FUNC
-		mv active_data checkpoints result/$ACTIVE_FUNC/
-		rm -rf data_bin
-	done
+	ACTIVE_FUNC=random	
+	BT $ACTIVE_FUNC 590000 11 6 
+	mkdir -p result/$ACTIVE_FUNC
+	mv active_data checkpoints result/$ACTIVE_FUNC/
+	rm -rf data_bin
+
+#	for ACTIVE_FUNC in longest shortest; do
+#		BT $ACTIVE_FUNC 
+#		mkdir -p result/$ACTIVE_FUNC
+#		mv active_data checkpoints result/$ACTIVE_FUNC/
+#		rm -rf data_bin
+#	done
 }
 
 

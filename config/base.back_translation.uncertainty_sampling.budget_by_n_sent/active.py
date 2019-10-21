@@ -191,7 +191,7 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
             print("S:", unlabeled_dataset[idx])
             print("H:", result[idx][2])
             print("T:", oracle[idx])
-            print("V:", 0.0)
+            print("V:", result[idx][0])
             print("I:", args.input, args.reference, idx)
     elif active_func == "longest":
         result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
@@ -272,7 +272,7 @@ def supvised_learning_modify(args):
     # Change datasets
     indices = np.arange(len(active_out))
     lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S: "):])).split(' ')) for item in active_out])
-    include = np.cumsum(lengths) <= args.tok_budget
+    include = np.cumsum(lengths) <= args.sent_budget
     not_include = (1 - include).astype('bool')
     include = indices[include]
     not_include = indices[not_include]
@@ -343,8 +343,8 @@ def back_translation_modify(args):
     
     # Change datasets
     indices = np.arange(len(active_out))
-    lengths = np.array([len(remove_special_tok(remove_bpe(item[0][len("S: "):])).split(' ')) for item in active_out])
-    include_oracle = np.cumsum(lengths) <= args.tok_budget
+    lengths = np.array([1 for item in active_out])
+    include_oracle = np.cumsum(lengths) <= args.sent_budget
 
     for idx in indices[include_oracle]:
         labeled_dataset[0].append(active_out[idx][0][len("S: "):].strip())
@@ -392,7 +392,7 @@ def back_translation_modify(args):
     f.close()
 
     output_train_src, output_train_tgt = args.output_train.split(',')
-    include_pseudo = np.cumsum(lengths) <= ( args.tok_budget + args.back_translation_tok_budget )
+    include_pseudo = np.cumsum(lengths) <= ( args.sent_budget + args.back_translation_sent_budget )
     include_pseudo = np.logical_xor(include_pseudo, include_oracle)
     include_pseudo = indices[include_pseudo]
     labeled_dataset[0].extend([active_out[idx][0][len("S: "):].strip() for idx in include_pseudo])
@@ -480,12 +480,12 @@ def main():
             required=True
             )
     parser_modify.add_argument(
-            "-tb", "--tok_budget", type=int,
+            "-sb", "--sent_budget", type=int,
             help="Token budget", required=True
             )
     parser_modify.add_argument(
-            '-bttb', '--back_translation_tok_budget', type=int, default=None,
-            help="Back translation token budget, if None, the same as tok_budget"
+            '-btsb', '--back_translation_sent_budget', type=int, default=None,
+            help="Back translation sentence budget, if None, the same as sent_budget"
             )
     parser_modify.add_argument(
             "-OU", "--output_unlabeled_dataset", type=str,
@@ -530,8 +530,8 @@ def main():
         query_instances(args, text, ref_text, args.active_func)
 
     elif args.mode == "modify":
-        if args.back_translation_tok_budget is None:
-            args.back_translation_tok_budget = args.tok_budget
+        if args.back_translation_sent_budget is None:
+            args.back_translation_sent_budget = args.sent_budget
         # Read labeled and unlabeled datasets
         if args.back_translation:
             back_translation_modify(args)

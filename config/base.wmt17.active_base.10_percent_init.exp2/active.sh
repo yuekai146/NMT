@@ -181,7 +181,7 @@ function BT () {
 	for i in $( seq $START_ROUND $N_ROUNDS )
 	do	
 		# Do active learning
-		Active_Learn $((i-1)) $i $LAN1 $LAN2 $ACTIVE_FUNC $TOK_BUDGET
+		#Active_Learn $((i-1)) $i $LAN1 $LAN2 $ACTIVE_FUNC $TOK_BUDGET
 		
 		# Train target to source network on new labeled dataset	
 		Train_Model $i $LAN2 $LAN1
@@ -190,7 +190,7 @@ function BT () {
 		Test_Model $i $LAN2 $LAN1
 
 		# Do active learning
-		Active_Learn $i $i $LAN2 $LAN1 $ACTIVE_FUNC $TOK_BUDGET
+		#Active_Learn $i $i $LAN2 $LAN1 $ACTIVE_FUNC $TOK_BUDGET
 
 		# Train source to target network on new labeled dataset
 		Train_Model $i $LAN1 $LAN2
@@ -203,7 +203,7 @@ function BT () {
 
 function main () {
 	for ACTIVE_FUNC in random; do
-		BT $ACTIVE_FUNC 
+		BT $ACTIVE_FUNC 590000 11 2 
 		mkdir -p result/$ACTIVE_FUNC
 		mv active_data checkpoints result/$ACTIVE_FUNC/
 		rm -rf data_bin

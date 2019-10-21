@@ -202,20 +202,12 @@ function BT () {
 
 
 function main () {
-	ACTIVE_FUNC=margin
-	Train_Model 4 en de
-	Test_Model 4 en de
-	BT $ACTIVE_FUNC 590000 11 5 
-	mkdir -p result/$ACTIVE_FUNC
-	mv active_data checkpoints result/$ACTIVE_FUNC/
-	rm -rf data_bin
-
-#	for ACTIVE_FUNC in te tte; do
-#		BT $ACTIVE_FUNC 
-#		mkdir -p result/$ACTIVE_FUNC
-#		mv active_data checkpoints result/$ACTIVE_FUNC/
-#		rm -rf data_bin
-#	done
+	for ACTIVE_FUNC in lc margin te tte; do
+		BT $ACTIVE_FUNC 
+		mkdir -p result/$ACTIVE_FUNC
+		mv active_data checkpoints result/$ACTIVE_FUNC/
+		rm -rf data_bin
+	done
 }
 
 

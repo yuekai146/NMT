@@ -1,26 +1,15 @@
-# back translation not finished
-
-SRC=de
-TGT=en
-
-
-SCRIPTS=/data/mosesdecoder/scripts
-CLEAN=$SCRIPTS/training/clean-corpus-n.perl
 FAIRSEQ_PATH=/data/fairseq
-BPEROOT=/data/fastBPE
-
-TEST_INPUT=../../data/de-en/wmt17_de_en/test.de
-TEST_REF=../../data/de-en/wmt17_de_en/test.en
 
 
 function Init_Active_BT () {
 	local SRC=$1
 	local TGT=$2
+	local active_func=$3
 
-	INIT_SRC=../../data/de-en/wmt17_de_en/init/labeled_1.$SRC
-	INIT_TGT=../../data/de-en/wmt17_de_en/init/labeled_1.$TGT
-	INIT_UNLABELED=../../data/de-en/wmt17_de_en/init/unlabeled_1.$SRC
-	INIT_ORACLE=../../data/de-en/wmt17_de_en/init/unlabeled_1.$TGT
+	INIT_SRC=../BT_comp.rand_20_percent/init/labeled_1.$SRC
+	INIT_TGT=../BT_comp.rand_20_percent/init/labeled_1.$TGT
+	INIT_UNLABELED=../BT_comp.rand_20_percent/init/unlabeled_1.$SRC
+	INIT_ORACLE=../BT_comp.rand_20_percent/init/unlabeled_1.$TGT
 
 	ACTIVE=active_data
 	ACTIVE_SRC2TGT=$ACTIVE/$SRC-$TGT
@@ -29,8 +18,6 @@ function Init_Active_BT () {
 	mkdir -p $ACTIVE $ACTIVE_SRC2TGT $ACTIVE_TGT2SRC data_bin
 	cp $INIT_UNLABELED $ACTIVE_SRC2TGT/unlabeled_1
 	cp $INIT_ORACLE $ACTIVE_SRC2TGT/oracle_1
-	cp $INIT_SRC $ACTIVE_SRC2TGT/train_1.$SRC
-	cp $INIT_TGT $ACTIVE_SRC2TGT/train_1.$TGT
 	cp $INIT_SRC $ACTIVE_SRC2TGT/labeled_1.$SRC
 	cp $INIT_TGT $ACTIVE_SRC2TGT/labeled_1.$TGT
 }
@@ -43,8 +30,8 @@ function Train_Model () {
 	
 	export NGPUS=8
 	rm -rf data_bin/$SRC-$TGT
-	SRC_RAW_TRAIN_PATH=active_data/$SRC-$TGT/train_${round}.$SRC
-	TGT_RAW_TRAIN_PATH=active_data/$SRC-$TGT/train_${round}.$TGT
+	SRC_RAW_TRAIN_PATH=active_data/$SRC-$TGT/train.$SRC
+	TGT_RAW_TRAIN_PATH=active_data/$SRC-$TGT/train.$TGT
 	SRC_RAW_VALID_PATH=../../data/de-en/wmt17_de_en/valid.$SRC
 	TGT_RAW_VALID_PATH=../../data/de-en/wmt17_de_en/valid.$TGT
 	python3 dataset.py --store \
@@ -62,7 +49,8 @@ function Train_Model () {
 		python3 -m torch.distributed.launch --nproc_per_node=$NGPUS train.py \
 			--data_bin data_bin/$SRC-$TGT/ \
 			--continue_path $continue_path \
-			--dump_path checkpoints/$SRC-$TGT/$round/ 
+			--dump_path checkpoints/$SRC-$TGT/$round/ \
+			--epoch_size 1
 	fi
 	rm -rf checkpoints/$SRC-$TGT/$round/checkpoint_?.pth
 	rm -rf checkpoints/$SRC-$TGT/$round/checkpoint_??.pth
@@ -105,10 +93,10 @@ function Active_Learn () {
 	
 	# Split unlabeled data into NGPUS chunks
 	cd active_data/$SRC-$TGT
-	num_U=$(cat unlabeled_$i | wc -l)
+	num_U=$(cat unlabeled_1 | wc -l)
 	num_chunk=$(($num_U / $NGPUS + 1))
-	split -l $num_chunk unlabeled_$i unlabeled_${i}_ -da 1
-	split -l $num_chunk oracle_$i oracle_${i}_ -da 1
+	split -l $num_chunk unlabeled_1 unlabeled_1_ -da 1
+	split -l $num_chunk oracle_1 oracle_1_ -da 1
 	cd -	
 	
 	# Get active function score
@@ -116,45 +104,24 @@ function Active_Learn () {
 	do
 		echo "CUDA_VISIBLE_DEVICES=$j python3 active.py score \
 			-a $ACTIVE_FUNC \
-			-i active_data/$SRC-$TGT/unlabeled_${i}_$j \
-			-ref active_data/$SRC-$TGT/oracle_${i}_$j \
+			-i active_data/$SRC-$TGT/unlabeled_1_$j \
+			-ref active_data/$SRC-$TGT/oracle_1_$j \
 			-ckpt checkpoints/$SRC-$TGT/$i/checkpoint_best_ppl.pth \
 			--max_batch_size 0 \
 			--tokens_per_batch 16384 > test_active.$SRC-$TGT.out_${i}_${j}" >> parallel_active.sh
 	done
+	
 	parallel -j $NGPUS < parallel_active.sh
 	rm parallel_active.sh
 	mv test_active.$SRC-$TGT.out_${i}_? active_data/$SRC-$TGT/
 	cd active_data/$SRC-$TGT/
 	cat test_active.$SRC-$TGT.out_${i}_? >> test_active.$SRC-$TGT.out_${i}
-	cd -
-
-	# Modify all data
-	U=active_data/$SRC-$TGT/unlabeled_$i
-	L=active_data/$SRC-$TGT/labeled_$i.$SRC,active_data/$SRC-$TGT/labeled_$i.$TGT
-	oracle=active_data/$SRC-$TGT/oracle_$i
-
-	OU=active_data/$TGT-$SRC/oracle_$out_i
-	OL=active_data/$TGT-$SRC/labeled_$out_i.$SRC,active_data/$TGT-$SRC/labeled_$out_i.$TGT
-	OO=active_data/$TGT-$SRC/unlabeled_$out_i
-	AO=active_data/$SRC-$TGT/test_active.$SRC-$TGT.out_${i}
-	onq=active_data/$SRC-$TGT/rnq_$out_i.$SRC-$TGT.$SRC,active_data/$SRC-$TGT/rnq_$out_i.$SRC-$TGT.$TGT
-	OT=active_data/$TGT-$SRC/train_$out_i.$SRC,active_data/$TGT-$SRC/train_$out_i.$TGT
 	
-	python3 active.py modify -U $U \
-		-L $L \
-		--oracle $oracle \
-		-tb $TOK_BUDGET \
-		-OU $OU \
-		-OL $OL \
-		-OO $OO \
-		-AO $AO \
-		-bt \
-		-onq $onq \
-		-OT $OT \
-		-bttb $((i*TOK_BUDGET + 9 * TOK_BUDGET))
-	cd active_data/$SRC-$TGT
-	rm test_active.$SRC-$TGT.out*
+	cat test_active.$SRC-$TGT.out_${i} | grep ^S | cut -d ' ' -f3- > ../$TGT-$SRC/train.$SRC
+	cat test_active.$SRC-$TGT.out_${i} | grep ^H | cut -d ' ' -f3- > ../$TGT-$SRC/train.$TGT
+	cat labeled_1.$SRC >> ../$TGT-$SRC/train.$SRC
+	cat labeled_1.$TGT >> ../$TGT-$SRC/train.$TGT
+	#rm test_active.$SRC-$TGT.out*
 	rm -rf *_${i}_?
 	cd -
 }
@@ -173,7 +140,15 @@ function BT () {
 	if [ $START_ROUND -eq 1 ]; then
 		Init_Active_BT $LAN1 $LAN2
 		Init_Active_BT $LAN2 $LAN1
-		cp -r ../../data/de-en/wmt17_de_en/BT_init_ckpt checkpoints	
+		cp -r ../BT_comp.rand_20_percent/checkpoints checkpoints	
+		cd checkpoints/
+		mv de-en 1
+		mkdir de-en
+		mv 1 de-en/
+		mv en-de 1
+		mkdir en-de
+		mv 1 en-de/
+		cd -
 		START_ROUND=2
 	fi
 
@@ -201,22 +176,5 @@ function BT () {
 }
 
 
-function main () {
-	ACTIVE_FUNC=margin
-	Train_Model 4 en de
-	Test_Model 4 en de
-	BT $ACTIVE_FUNC 590000 11 5 
-	mkdir -p result/$ACTIVE_FUNC
-	mv active_data checkpoints result/$ACTIVE_FUNC/
-	rm -rf data_bin
-
-#	for ACTIVE_FUNC in te tte; do
-#		BT $ACTIVE_FUNC 
-#		mkdir -p result/$ACTIVE_FUNC
-#		mv active_data checkpoints result/$ACTIVE_FUNC/
-#		rm -rf data_bin
-#	done
-}
-
-
-main
+BT random 590000 11 3 en de
+#BT random 590000 11 1 de en

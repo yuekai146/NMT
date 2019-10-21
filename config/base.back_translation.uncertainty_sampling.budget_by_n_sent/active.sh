@@ -100,7 +100,7 @@ function Active_Learn () {
 	local SRC=$3
 	local TGT=$4
 	local ACTIVE_FUNC=$5
-	local TOK_BUDGET=$6
+	local SENT_BUDGET=$6
 	export NGPUS=8
 	
 	# Split unlabeled data into NGPUS chunks
@@ -144,7 +144,7 @@ function Active_Learn () {
 	python3 active.py modify -U $U \
 		-L $L \
 		--oracle $oracle \
-		-tb $TOK_BUDGET \
+		-sb $SENT_BUDGET \
 		-OU $OU \
 		-OL $OL \
 		-OO $OO \
@@ -152,7 +152,7 @@ function Active_Learn () {
 		-bt \
 		-onq $onq \
 		-OT $OT \
-		-bttb $((i*TOK_BUDGET + 9 * TOK_BUDGET))
+		-btsb $((i*SENT_BUDGET + 9 * SENT_BUDGET))
 	cd active_data/$SRC-$TGT
 	rm test_active.$SRC-$TGT.out*
 	rm -rf *_${i}_?
@@ -163,7 +163,7 @@ function Active_Learn () {
 function BT () {
 	# Initialize labeled and unlabeled dataset
 	local ACTIVE_FUNC=${1:-random}
-	local TOK_BUDGET=${2:-590000}
+	local SENT_BUDGET=${2:-19000}
 	local N_ROUNDS=${3:-11}
 	local START_ROUND=${4:-1}
 	local LAN1=${5:-en}
@@ -181,7 +181,7 @@ function BT () {
 	for i in $( seq $START_ROUND $N_ROUNDS )
 	do	
 		# Do active learning
-		Active_Learn $((i-1)) $i $LAN1 $LAN2 $ACTIVE_FUNC $TOK_BUDGET
+		Active_Learn $((i-1)) $i $LAN1 $LAN2 $ACTIVE_FUNC $SENT_BUDGET
 		
 		# Train target to source network on new labeled dataset	
 		Train_Model $i $LAN2 $LAN1
@@ -190,7 +190,7 @@ function BT () {
 		Test_Model $i $LAN2 $LAN1
 
 		# Do active learning
-		Active_Learn $i $i $LAN2 $LAN1 $ACTIVE_FUNC $TOK_BUDGET
+		Active_Learn $i $i $LAN2 $LAN1 $ACTIVE_FUNC $SENT_BUDGET
 
 		# Train source to target network on new labeled dataset
 		Train_Model $i $LAN1 $LAN2
@@ -202,20 +202,13 @@ function BT () {
 
 
 function main () {
-	ACTIVE_FUNC=margin
-	Train_Model 4 en de
-	Test_Model 4 en de
-	BT $ACTIVE_FUNC 590000 11 5 
-	mkdir -p result/$ACTIVE_FUNC
-	mv active_data checkpoints result/$ACTIVE_FUNC/
-	rm -rf data_bin
 
-#	for ACTIVE_FUNC in te tte; do
-#		BT $ACTIVE_FUNC 
-#		mkdir -p result/$ACTIVE_FUNC
-#		mv active_data checkpoints result/$ACTIVE_FUNC/
-#		rm -rf data_bin
-#	done
+	for ACTIVE_FUNC in lc margin; do
+		BT $ACTIVE_FUNC 
+		mkdir -p result/$ACTIVE_FUNC
+		mv active_data checkpoints result/$ACTIVE_FUNC/
+		rm -rf data_bin
+	done
 }
 
 

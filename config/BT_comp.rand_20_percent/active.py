@@ -191,7 +191,7 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random"):
             print("S:", unlabeled_dataset[idx])
             print("H:", result[idx][2])
             print("T:", oracle[idx])
-            print("V:", 0.0)
+            print("V:", result[idx][0])
             print("I:", args.input, args.reference, idx)
     elif active_func == "longest":
         result = get_scores(args, net, active_func, infer_dataiter, src_vocab, tgt_vocab)
