@@ -192,8 +192,6 @@ def remove_bpe(s):
 
 
 def remove_special_tok(s):
-    s = s.replace("<s>", "")
-    s = s.replace("</s>", "")
-    s = s.replace("<pad>", "")
-    s = s.replace("<unk>", "")
+    for tok in config.SPECIAL_TOKENS:
+        s = s.replace(tok, "")
     return s

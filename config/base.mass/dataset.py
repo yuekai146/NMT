@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 #
 
-from common import config
+from common import config, MODE
 import argparse
 import dill
 import math
@@ -44,6 +44,7 @@ class Batch(object):
     def __init__(self, src, tgt):
         self.src = src
         self.tgt = tgt
+
 
 class Dataset(object):
 
@@ -121,6 +122,50 @@ class Dataset(object):
             else:
                 sent = self.batch_sentences(sent, bos, eos)
             yield sent
+
+    
+    def get_batch_ids(self, shuffle, group_by_size=False, num_subsets=None):
+        assert type(shuffle) is bool and type(group_by_size) is bool
+        assert group_by_size is False or shuffle is True
+        assert num_subsets is None or isinstance(num_subsets, int)
+
+        if num_subsets is not None:
+            assert num_subsets > 1
+
+        # sentence lengths
+        #lengths = self.lengths1 + self.lengths2 + 2
+        lengths = self.lengths
+
+        # select sentences to iterate over
+        if shuffle:
+            indices = np.random.permutation(len(self.sent))
+        else:
+            indices = np.arange(len(self.sent))
+
+        # group sentences by lengths
+        if group_by_size:
+            indices = indices[np.argsort(lengths[indices], kind='mergesort')]
+
+        # create batches - either have a fixed number of sentences, or a similar number of tokens
+        if self.tokens_per_batch == -1:
+            batches = np.array_split(indices, math.ceil(len(indices) * 1. / self.batch_size))
+        else:
+            batch_ids = np.cumsum(lengths[indices]) // self.tokens_per_batch
+            _, bounds = np.unique(batch_ids, return_index=True)
+            batches = [indices[bounds[i]:bounds[i + 1]] for i in range(len(bounds) - 1)]
+            if bounds[-1] < len(indices):
+                batches.append(indices[bounds[-1]:])
+
+        # optionally shuffle batches
+        if shuffle:
+            np.random.shuffle(batches)
+
+        if num_subsets is not None:
+            subset_batch_num = len(batches) // num_subsets
+            subset_batches = [batches[i*subset_batch_num:(i+1)*subset_batch_num] for i in range(num_subsets)]
+            batches = subset_batches
+
+        return batches
 
 
     def get_iterator(self, shuffle, group_by_size=False, bos=False, eos=False, include_indices=False):
@@ -276,66 +321,95 @@ class ParallelDataset(Dataset):
 
 
 def get(params=None):
-    if params is not None:
-        SRC_VOCAB_PATH = config.SRC_VOCAB_PATH if params.SRC_VOCAB_PATH is None else params.SRC_VOCAB_PATH
-        TGT_VOCAB_PATH = config.TGT_VOCAB_PATH if params.TGT_VOCAB_PATH is None else params.TGT_VOCAB_PATH
-        SRC_RAW_TRAIN_PATH = config.SRC_RAW_TRAIN_PATH if params.SRC_RAW_TRAIN_PATH is None else params.SRC_RAW_TRAIN_PATH
-        TGT_RAW_TRAIN_PATH = config.TGT_RAW_TRAIN_PATH if params.TGT_RAW_TRAIN_PATH is None else params.TGT_RAW_TRAIN_PATH
-        SRC_RAW_VALID_PATH = config.SRC_RAW_VALID_PATH if params.SRC_RAW_VALID_PATH is None else params.SRC_RAW_VALID_PATH
-        TGT_RAW_VALID_PATH = config.TGT_RAW_VALID_PATH if params.TGT_RAW_VALID_PATH is None else params.TGT_RAW_VALID_PATH
-
-    SRC = Text(Vocab(SRC_VOCAB_PATH), False, False)
-    TGT = Text(Vocab(TGT_VOCAB_PATH), True, True)
     
     def read_sents(fpath):
         return open(fpath, 'r').read().split('\n')[:-1]
-
-    src_sents = read_sents(SRC_RAW_TRAIN_PATH)
-    tgt_sents = read_sents(TGT_RAW_TRAIN_PATH)
-    print("Parallel sentences already read!")
-    assert len(src_sents) == len(tgt_sents)
-
-    train_iter = ParallelDataset(
-            src_sents,
-            tgt_sents,
-            SRC.vocab,
-            TGT.vocab
-            )
     
-    valid_iter = ParallelDataset(
-            read_sents(SRC_RAW_VALID_PATH),
-            read_sents(TGT_RAW_VALID_PATH),
-            SRC.vocab,
-            TGT.vocab
-            )
-    valid_iter.tokens_per_batch = 2000
-    #valid_iter.batch_size = 32
+    if MODE == "MT":
+        if params is not None:
+            SRC_VOCAB_PATH = config.SRC_VOCAB_PATH if params.SRC_VOCAB_PATH is None else params.SRC_VOCAB_PATH
+            TGT_VOCAB_PATH = config.TGT_VOCAB_PATH if params.TGT_VOCAB_PATH is None else params.TGT_VOCAB_PATH
+            SRC_RAW_TRAIN_PATH = config.SRC_RAW_TRAIN_PATH if params.SRC_RAW_TRAIN_PATH is None else params.SRC_RAW_TRAIN_PATH
+            TGT_RAW_TRAIN_PATH = config.TGT_RAW_TRAIN_PATH if params.TGT_RAW_TRAIN_PATH is None else params.TGT_RAW_TRAIN_PATH
+            SRC_RAW_VALID_PATH = config.SRC_RAW_VALID_PATH if params.SRC_RAW_VALID_PATH is None else params.SRC_RAW_VALID_PATH
+            TGT_RAW_VALID_PATH = config.TGT_RAW_VALID_PATH if params.TGT_RAW_VALID_PATH is None else params.TGT_RAW_VALID_PATH
 
-    return train_iter, valid_iter, SRC, TGT
+        SRC = Text(Vocab(SRC_VOCAB_PATH), False, False)
+        TGT = Text(Vocab(TGT_VOCAB_PATH), True, True)
+        
+
+        src_sents = read_sents(SRC_RAW_TRAIN_PATH)
+        tgt_sents = read_sents(TGT_RAW_TRAIN_PATH)
+        print("Parallel sentences already read!")
+        assert len(src_sents) == len(tgt_sents)
+
+        train_iter = ParallelDataset(
+                src_sents,
+                tgt_sents,
+                SRC.vocab,
+                TGT.vocab
+                )
+        
+        valid_iter = ParallelDataset(
+                read_sents(SRC_RAW_VALID_PATH),
+                read_sents(TGT_RAW_VALID_PATH),
+                SRC.vocab,
+                TGT.vocab
+                )
+        valid_iter.tokens_per_batch = 2000
+        return train_iter, valid_iter, SRC, TGT
+
+    elif MODE == "MASS":
+        TOTAL = Text(Vocab(config.TOTAL_VOCAB_PATH), False, False)
+        sents = {}
+        for lan, raw_train_path in zip(config.LANS, config.MONO_RAW_TRAIN_PATH):
+            sents[lan.lower()] = read_sents(raw_train_path)
+            print("Read {} mono corpus from {}".format(lan, raw_train_path))
+        train_iter = {}
+        for k, v in sents.items():
+            train_iter[k] = Dataset(sents[k], TOTAL.vocab)
+
+        valid_iter = {}
+        for direction in config.valid_directions.split(','):
+            valid_src_path, valid_tgt_path = config.RAW_VALID_PATH[direction]
+            valid_iter[direction] = ParallelDataset(
+                    read_sents(valid_src_path),
+                    read_sents(valid_tgt_path),
+                    TOTAL.vocab,
+                    TOTAL.vocab
+                    )
+        return train_iter, valid_iter, TOTAL
 
 
 def load():
-        # Load train dataset
-        f = open(os.path.join(config.train_iter_dump_path), 'rb')
-        train_iter = dill.load(f)
+    
+    def load_pkl(fpath):
+        f = open(fpath, 'rb')
+        ret = dill.load(f)
         f.close()
+        return ret
+
+    if MODE == "MT":
+        # Load train dataset
+        train_iter = load_pkl(os.path.join(config.train_iter_dump_path))
         
         # Load valid dataset
-        f = open(os.path.join(config.valid_iter_dump_path), 'rb')
-        valid_iter = dill.load(f)
-        f.close()
+        valid_iter = load_pkl(os.path.join(config.valid_iter_dump_path))
         
         # Dump src vocab
-        f = open(os.path.join(config.src_vocab_dump_path), 'rb')
-        SRC_TEXT = dill.load(f)
-        f.close()
+        SRC_TEXT = load_pkl(os.path.join(config.src_vocab_dump_path))
         
         # Dump tgt vocab
-        f = open(os.path.join(config.tgt_vocab_dump_path), 'rb')
-        TGT_TEXT = dill.load(f)
-        f.close()
+        TGT_TEXT = load_pkl(os.path.join(config.tgt_vocab_dump_path))
 
         return train_iter, valid_iter, SRC_TEXT, TGT_TEXT
+    
+    elif MODE == "MASS":
+        train_iter = load_pkl(config.train_iter_dump_path)
+        valid_iter = load_pkl(config.valid_iter_dump_path)
+        TOTAL_TEXT = load_pkl(config.total_vocab_dump_path)
+
+        return train_iter, valid_iter, TOTAL_TEXT
 
 
 if __name__ == "__main__":
@@ -350,8 +424,11 @@ if __name__ == "__main__":
     parser.add_argument('--TGT_VOCAB_PATH', default=None, type=str, help="Path to store target vocab")
     parser.add_argument('--data_bin', default=None, type=str, help="Path to store binarized data")
     args = parser.parse_args()
-
-    train_iter, valid_iter, SRC_TEXT, TGT_TEXT = get(args)
+    
+    if MODE == "MT":
+        train_iter, valid_iter, SRC_TEXT, TGT_TEXT = get(args)
+    elif MODE == "MASS":
+        train_iter, valid_iter, TOTAL_TEXT = get(args)
     
     if args.test:
         from utils import get_batch
@@ -381,41 +458,72 @@ if __name__ == "__main__":
                 if i_batch >= 0:
                     break
         test_iterator(train_iter.get_iterator(True, True))
-        #test_iterator(valid_iter.get_iterator(True, True))
 
     if args.store: 
-        if args.data_bin is None:
-            args.data_bin = config.data_bin
-        if os.path.exists(args.data_bin) == False:
-            os.makedirs(args.data_bin)
-        
-        if args.data_bin != config.data_bin:
-            train_iter_dump_path = args.data_bin + 'train_iter'
-            valid_iter_dump_path = args.data_bin + 'valid_iter'
-            src_vocab_dump_path = args.data_bin + 'SRC'
-            tgt_vocab_dump_path = args.data_bin + 'TGT'
-        else:
-            train_iter_dump_path = config.data_bin + 'train_iter'
-            valid_iter_dump_path = config.data_bin + 'valid_iter'
-            src_vocab_dump_path = config.data_bin + 'SRC'
-            tgt_vocab_dump_path = config.data_bin + 'TGT'
+        if MODE == "MT":
+            if args.data_bin is None:
+                args.data_bin = config.data_bin
+            if os.path.exists(args.data_bin) == False:
+                os.makedirs(args.data_bin)
+            
+            if args.data_bin != config.data_bin:
+                train_iter_dump_path = args.data_bin + 'train_iter'
+                valid_iter_dump_path = args.data_bin + 'valid_iter'
+                src_vocab_dump_path = args.data_bin + 'SRC'
+                tgt_vocab_dump_path = args.data_bin + 'TGT'
+            else:
+                train_iter_dump_path = config.data_bin + 'train_iter'
+                valid_iter_dump_path = config.data_bin + 'valid_iter'
+                src_vocab_dump_path = config.data_bin + 'SRC'
+                tgt_vocab_dump_path = config.data_bin + 'TGT'
 
-        # Dump train dataset
-        f = open(os.path.join(train_iter_dump_path), 'wb')
-        pickle.dump(train_iter, f)
-        f.close()
+            # Dump train dataset
+            f = open(os.path.join(train_iter_dump_path), 'wb')
+            pickle.dump(train_iter, f)
+            f.close()
+            
+            # Dump valid dataset
+            f = open(os.path.join(valid_iter_dump_path), 'wb')
+            pickle.dump(valid_iter, f)
+            f.close()
+            
+            # Dump src vocab
+            f = open(os.path.join(src_vocab_dump_path), 'wb')
+            pickle.dump(SRC_TEXT, f)
+            f.close()
+            
+            # Dump tgt vocab
+            f = open(os.path.join(tgt_vocab_dump_path), 'wb')
+            pickle.dump(TGT_TEXT, f)
+            f.close()
         
-        # Dump valid dataset
-        f = open(os.path.join(valid_iter_dump_path), 'wb')
-        pickle.dump(valid_iter, f)
-        f.close()
-        
-        # Dump src vocab
-        f = open(os.path.join(src_vocab_dump_path), 'wb')
-        pickle.dump(SRC_TEXT, f)
-        f.close()
-        
-        # Dump tgt vocab
-        f = open(os.path.join(tgt_vocab_dump_path), 'wb')
-        pickle.dump(TGT_TEXT, f)
-        f.close()
+        elif MODE == "MASS":
+
+            if args.data_bin is None:
+                args.data_bin = config.data_bin
+            if os.path.exists(args.data_bin) == False:
+                os.makedirs(args.data_bin)
+            
+            if args.data_bin != config.data_bin:
+                train_iter_dump_path = args.data_bin + 'train_iter'
+                valid_iter_dump_path = args.data_bin + 'valid_iter'
+                total_vocab_dump_path = args.data_bin + 'TOTAL'
+            else:
+                train_iter_dump_path = config.data_bin + 'train_iter'
+                valid_iter_dump_path = config.data_bin + 'valid_iter'
+                total_vocab_dump_path = config.data_bin + 'TOTAL'
+
+            # Dump train dataset
+            f = open(os.path.join(train_iter_dump_path), 'wb')
+            pickle.dump(train_iter, f)
+            f.close()
+            
+            # Dump valid dataset
+            f = open(os.path.join(valid_iter_dump_path), 'wb')
+            pickle.dump(valid_iter, f)
+            f.close()
+            
+            # Dump total vocab
+            f = open(os.path.join(total_vocab_dump_path), 'wb')
+            pickle.dump(TOTAL_TEXT, f)
+            f.close()

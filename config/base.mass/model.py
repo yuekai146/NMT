@@ -8,7 +8,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import itertools
 
-from common import config
+from common import config, MODE
 
 
 NEW_ID = itertools.count()
@@ -36,22 +36,44 @@ class Encoder_Decoder(nn.Module):
             self.tgt_emb[0].emb.weight = self.src_emb[0].emb.weight
             self.generator.proj.weight = self.src_emb[0].emb.weight
 
-    def forward(self, src, src_mask, tgt, tgt_mask, log_prob=True):
-        return self.generator(
-                self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask),
-                log_prob=log_prob
-                )
+    def forward(
+            self, src, src_mask, tgt, tgt_mask,
+            log_prob=True, src_pos=None, tgt_pos=None,
+            src_lang=None, tgt_lang=None
+            ):
+        if src_pos is None and tgt_pos is None and src_lang is None and tgt_lang is None:
+            return self.generator(
+                    self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask),
+                    log_prob=log_prob
+                    )
+        else:
+            src_emb = self.src_emb[0](src, lang=src_lang)
+            src_emb = self.src_emb[1](src_emb, pos=src_pos)
+            enc_out = self.encoder(src_emb, src_mask)
 
-    def encode(self, src, src_mask):
-        return self.encoder(self.src_emb(src), src_mask)
+            tgt_emb = self.tgt_emb[0](tgt, lang=tgt_lang)
+            tgt_emb = self.tgt_emb[1](tgt_emb,pos=tgt_pos)
+            return self.generator(
+                    self.decoder(tgt_emb, enc_out, src_mask, tgt_mask)
+                    )
 
-    def decode(self, memory, src_mask, tgt, tgt_mask, cache=None):
+    def encode(self, src, src_mask, src_lang=None, src_pos=None):
+        if src_lang is None:
+            return self.encoder(self.src_emb(src), src_mask)
+        else:
+            src_emb = self.src_emb[0](src, lang=src_lang)
+            src_emb = self.src_emb[1](src_emb, pos=src_pos)
+            return self.encoder(src_emb, src_mask)
+
+    def decode(self, memory, src_mask, tgt, tgt_mask, cache=None, tgt_lang=None, tgt_pos=None):
         if cache is not None and 'cur_len' in cache:
-            x = self.tgt_emb[0](tgt)
-            x = self.tgt_emb[1](x, cache['cur_len'])
+            x = self.tgt_emb[0](tgt, lang=tgt_lang)
+            x = self.tgt_emb[1](x, cache['cur_len'], pos=tgt_pos)
             return self.decoder(x, memory, src_mask, tgt_mask, cache)
         else:
-            return self.decoder(self.tgt_emb(tgt), memory, src_mask, tgt_mask, cache)
+            x = self.tgt_emb[0](tgt, lang=tgt_lang)
+            x = self.tgt_emb[1](x, pos=tgt_pos)
+            return self.decoder(x, memory, src_mask, tgt_mask, cache)
 
 
 class Generator(nn.Module):
@@ -263,8 +285,16 @@ class Embeddings(nn.Module):
         self.emb = nn.Embedding(n_vocab, d_model)
         self.d_model = d_model
 
-    def forward(self, x):
-        return self.emb(x)
+    def forward(self, x, lang=None):
+        # x: (bsz, slen)
+        # lang: integer (Language token id)
+        if lang is None:
+            return self.emb(x)
+        else:
+            lang_embs = x.new_zeros(x.size()).long() + lang
+            lang_embs = self.emb(lang_embs)
+
+            return self.emb(x) + lang_embs
 
 
 class Positional_Embeddings(nn.Module):
@@ -274,12 +304,14 @@ class Positional_Embeddings(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
         self.emb = nn.Embedding(max_len, d_model)
         
-    def forward(self, x, start=0):
+    def forward(self, x, start=0, pos=None):
         bsz = x.size(0)
         slen = x.size(1)
-        pos_emb = x.new_zeros(bsz, slen).long()
-        pos_emb[:] = torch.arange(slen) + start
-        x = x + self.emb(pos_emb)
+        if pos is None:
+            pos = x.new_zeros(bsz, slen).long()
+            pos[:] = torch.arange(slen) + start
+
+        x = x + self.emb(pos)
         return self.dropout(x)
 
 
@@ -316,24 +348,26 @@ class Label_Smoothing_Loss(nn.Module):
 
 
 def dummpy_input():
+    bsz = 300
     # Used for testing network forward and backward
-    lengths = np.random.randint(low=1, high=int(config.tokens_per_batch / config.max_batch_size), size=(config.max_batch_size))
+    lengths = np.random.randint(low=5, high=int(config.tokens_per_batch / bsz), size=(bsz))
     src = []
+    n_vocab = config.total_n_vocab if MODE == "MASS" else min(config.src_n_vocab, config.tgt_n_vocab)
     for l in lengths:
-        src_sent = np.random.randint(low=config.N_SPECIAL_TOKENS, high=config.src_n_vocab, size=(l)).tolist()
-        src_sent += np.zeros(int(config.tokens_per_batch / config.max_batch_size) - l).tolist()
+        src_sent = np.random.randint(low=config.N_SPECIAL_TOKENS, high=n_vocab, size=(l)).tolist()
+        src_sent += np.zeros(int(config.tokens_per_batch / bsz) - l).tolist()
         src.append(src_sent)
 
-    lengths = np.random.randint(low=1, high=int(config.tokens_per_batch / config.max_batch_size), size=(config.max_batch_size))
+    lengths = np.random.randint(low=5, high=int(config.tokens_per_batch / bsz), size=(bsz))
     tgt = []
     for l in lengths:
-        tgt_sent = np.random.randint(low=config.N_SPECIAL_TOKENS, high=config.tgt_n_vocab, size=(l)).tolist()
-        tgt_sent += np.zeros(int(config.tokens_per_batch / config.max_batch_size) - l).tolist()
+        tgt_sent = np.random.randint(low=config.N_SPECIAL_TOKENS, high=n_vocab, size=(l)).tolist()
+        tgt_sent += np.zeros(int(config.tokens_per_batch / bsz) - l).tolist()
         tgt.append(tgt_sent)
 
     src, tgt = torch.from_numpy(np.array(src)).long(), torch.from_numpy(np.array(tgt)).long()
     src_mask, tgt_mask = (src != 0), (tgt != 0)
-    batch = {"src":src, "tgt":tgt, "src_mask":src_mask.unsqueeze(-2), "tgt_mask":tgt_mask.unsqueeze(-2)}
+    batch = {"src":src, "tgt":tgt, "src_mask":src_mask.unsqueeze(-1), "tgt_mask":tgt_mask.squeeze(-1)}
     if config.use_cuda:
         from utils import to_cuda
         batch = to_cuda(batch)
@@ -346,13 +380,22 @@ def get():
     attn = Multi_Head_Attention(config.d_model, config.num_heads)
     ff = Positionwise_Feed_Forward(config.d_model, config.d_ff, config.dropout, config.gelu_activation)
     position = Positional_Embeddings(config.d_model, config.dropout)
-    net = Encoder_Decoder(
-            Encoder(Encoder_Layer(config.d_model, c(attn), c(ff), config.dropout), config.encoder_num_layers),
-            Decoder(Decoder_Layer(config.d_model, c(attn), c(attn), c(ff), config.dropout), config.decoder_num_layers),
-            nn.Sequential(Embeddings(config.d_model, config.src_n_vocab), c(position)),
-            nn.Sequential(Embeddings(config.d_model, config.tgt_n_vocab), c(position)),
-            Generator(config.d_model, config.tgt_n_vocab)
-            )
+    if MODE == "MT":
+        net = Encoder_Decoder(
+                Encoder(Encoder_Layer(config.d_model, c(attn), c(ff), config.dropout), config.encoder_num_layers),
+                Decoder(Decoder_Layer(config.d_model, c(attn), c(attn), c(ff), config.dropout), config.decoder_num_layers),
+                nn.Sequential(Embeddings(config.d_model, config.src_n_vocab), c(position)),
+                nn.Sequential(Embeddings(config.d_model, config.tgt_n_vocab), c(position)),
+                Generator(config.d_model, config.tgt_n_vocab)
+                )
+    elif MODE == "MASS":
+        net = Encoder_Decoder(
+                Encoder(Encoder_Layer(config.d_model, c(attn), c(ff), config.dropout), config.encoder_num_layers),
+                Decoder(Decoder_Layer(config.d_model, c(attn), c(attn), c(ff), config.dropout), config.decoder_num_layers),
+                nn.Sequential(Embeddings(config.d_model, config.total_n_vocab), c(position)),
+                nn.Sequential(Embeddings(config.d_model, config.total_n_vocab), c(position)),
+                Generator(config.d_model, config.total_n_vocab)
+                )
     for name, p in net.named_parameters():
         if "emb" in name:
             nn.init.normal_(p, mean=0, std=config.d_model ** -0.5)
@@ -378,7 +421,7 @@ if __name__ == "__main__":
     batch = dummpy_input()
     
     for i in range(1000):
-        logits = net(**batch)
+        logits = net(**batch, src_lang=5, tgt_lang=6)
         loss, nll_loss = criterion(logits, batch['tgt'], batch['tgt_mask'].squeeze())
         loss.backward()
         print(nll_loss.item())
