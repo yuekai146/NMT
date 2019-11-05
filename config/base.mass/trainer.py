@@ -695,7 +695,7 @@ class Enc_Dec_Trainer(Trainer):
                 else:
                     net = self.net
                 
-                for direction, valid_iter in self.iterators["valid"]:
+                for direction, valid_iter in self.iterators["valid"].items():
                     src_lan, tgt_lan = direction.split('-')
                     valid_iter.tokens_per_batch = -1
                     valid_iter.batch_size = 32
@@ -705,7 +705,7 @@ class Enc_Dec_Trainer(Trainer):
                         # generate batch
                         batch = get_batch(
                                 raw_batch.src, raw_batch.tgt,
-                                self.SRC_TEXT.vocab, self.TGT_TEXT.vocab
+                                self.TOTAL_TEXT.vocab, self.TOTAL_TEXT.vocab
                                 )
 
 
@@ -737,7 +737,6 @@ class Enc_Dec_Trainer(Trainer):
                         del logits
                         del loss
                         del nll_loss
-                        del inputs
                         del loss_inputs
                         del batch
 

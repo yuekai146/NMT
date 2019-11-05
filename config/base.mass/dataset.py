@@ -261,7 +261,7 @@ class ParallelDataset(Dataset):
             if 0 < self.max_batch_size < len(sentence_ids):
                 np.random.shuffle(sentence_ids)
                 sentence_ids = sentence_ids[:self.max_batch_size]
-            sent1 = self.batch_sentences([self.sent1[idx] for idx in sentence_ids], bos=False, eos=False)
+            sent1 = self.batch_sentences([self.sent1[idx] for idx in sentence_ids], bos=True, eos=True)
             sent2 = self.batch_sentences([self.sent2[idx] for idx in sentence_ids], bos=True, eos=True)
             yield Batch(sent1, sent2)
 

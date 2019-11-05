@@ -222,6 +222,7 @@ def MASS_main():
                 num_train = sum([len(b) for b in subset_batches])
                 trainer.num_train += num_train
 
+        trainer.valid_step()
         min_n_batches = min(n_batches.values())
         for i_batch in range(min_n_batches):
             for k in data_iter.keys():
