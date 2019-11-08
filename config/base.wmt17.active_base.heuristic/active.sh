@@ -23,6 +23,7 @@ TEST_REF=../../data/de-en/wmt17_de_en/test.en
 function Active_NMT () {
 	local ACTIVE_FUNC=$1
 	local START_ROUND=$2
+	local warm_up=$3
 	
 	# Initialize labeled and unlabeled dataset
 	mkdir -p $ACTIVE
@@ -32,6 +33,11 @@ function Active_NMT () {
 
 	for i in $( seq $START_ROUND $N_ROUNDS )
 	do	
+		if [ "$i" -lt "$warm_up" ]; then
+			warm_up_ACTIVE_FUNC=random
+		else
+			warm_up_ACTIVE_FUNC=$ACTIVE_FUNC
+		fi
 		# Do active learning
 		#cd active_data
 		#num_U=$(cat unlabeled_${i} | wc -l)
@@ -52,7 +58,8 @@ function Active_NMT () {
 		#rm parallel_active.sh
 		#mv test_active.out_${i}_? active_data/
 		#cat active_data/test_active.out_${i}_? >> active_data/test_active.out_$i
-		python3 active.py score -a $ACTIVE_FUNC \
+
+		python3 active.py score -a $warm_up_ACTIVE_FUNC \
 			-i ${U}${i} -lb ${L}${i} -ref ${ORACLE}${i} \
 			-ckpt checkpoint/$((i))/checkpoint_best_ppl.pth \
 			--max_batch_size 0 \
@@ -108,7 +115,7 @@ function Active_NMT () {
 function main () {
 	mkdir -p ./result
 	for ACTIVE_FUNC in dden; do
-		Active_NMT $ACTIVE_FUNC 0
+		Active_NMT $ACTIVE_FUNC 0 1
 		mkdir -p ./result/$ACTIVE_FUNC
 		mv checkpoints active_data ./result/$ACTIVE_FUNC/
 		rm -rf data_bin

@@ -263,7 +263,7 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random", label
                 if token not in punc:
                     if token in count_l.keys():
                         sum_for_sentence += 0
-                        #sum_for_sentence += p_u[token] * math.exp(-lamb1 * count_l[token])
+                        sum_for_sentence += p_u[token] * math.exp(-lamb1 * count_l[token])
                     else:
                         sum_for_sentence += p_u[token]
                 len_for_sentence += 1
@@ -284,10 +284,10 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random", label
                 if token not in punc:
                     p_tmp = p_u[token]
                     if token in count_batch.keys():
-                        #p_tmp = 0
+                        p_tmp = 0
                         p_tmp *= math.exp(-lamb2 * count_batch[token])
                     if token in count_l.keys():
-                        p_tmp = 0
+                        #p_tmp = 0
                         p_tmp *= math.exp(-lamb1 * count_l[token])
                     sum_for_sentence += p_tmp
                 len_for_sentence += 1
