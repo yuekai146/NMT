@@ -369,7 +369,7 @@ class Trainer(object):
 class Enc_Dec_Trainer(Trainer):
         
     
-    def mt_step(self, raw_batch, src_lan, tgt_lan):
+    def mt_step(self, raw_batch):
         """
         Machine translation training step.
         Can also be used for denoising auto-encoding.
@@ -389,14 +389,14 @@ class Enc_Dec_Trainer(Trainer):
         # Network forward step
         tensor = self.net(
                 batch['src'], batch['src_mask'], batch['tgt'], batch['tgt_mask'],
-                src_lang=self.SRC_TEXT.vocab.stoi['<' + src_lan.upper() + '>'],
-                tgt_lang=self.TGT_TEXT.vocab.stoi['<' + tgt_lan.upper() + '>']
+                src_lang=self.SRC_TEXT.vocab.stoi['<' + config.SRC_LAN.upper() + '>'],
+                tgt_lang=self.TGT_TEXT.vocab.stoi['<' + config.TGT_LAN.upper() + '>']
                 )
 
         # loss
         loss, nll_loss = self.criterion(tensor, batch['target'], batch['target_mask'])
-        self.stats[('MT-%s-%s-loss' % (src_lan, tgt_lan))].append(loss.item())
-        self.stats[('MT-%s-%s-ppl' % (src_lan, tgt_lan))].append(nll_loss.exp().item())
+        self.stats[('MT-%s-%s-loss' % (config.SRC_LAN, config.TGT_LAN))].append(loss.item())
+        self.stats[('MT-%s-%s-ppl' % (config.SRC_LAN, config.TGT_LAN))].append(nll_loss.exp().item())
         # optimize
         self.optimize(loss)
 
@@ -411,6 +411,50 @@ class Enc_Dec_Trainer(Trainer):
         del nll_loss
         del tensor
 	
+    
+    def mass_step(self, raw_batch, lan):
+        """
+        Machine translation training step.
+        Can also be used for denoising auto-encoding.
+        """
+        self.net.train()
+        self.criterion.train()
+        if config.multi_gpu:
+            self.net.module.train()
+        
+        bsz = raw_batch.size(0)
+        l = ( raw_batch != self.TOTAL_TEXT.vocab.stoi[config.PAD] ).sum(-1).view(bsz).long().numpy().tolist()
+        batch = self.restricted_mask_sent(raw_batch, l)
+        batch_size = batch["src"].size(0)
+        del raw_batch
+        # Get a batch of input data
+        
+        # Network forward step
+        tensor = self.net(
+                batch['src'], batch['src_mask'], batch['tgt'], batch['tgt_mask'],
+                tgt_pos=batch["tgt_pos"],
+                src_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>'],
+                tgt_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>']
+                )
+
+        # loss
+        loss, nll_loss = self.criterion(tensor, batch['target'], batch['target_mask'])
+        self.stats[('MASS-%s-loss' % (lan))].append(loss.item())
+        self.stats[('MASS-%s-ppl' % (lan))].append(nll_loss.exp().item())
+        # optimize
+        self.optimize(loss)
+
+        # number of processed sentences / words
+        n_tokens = batch["n_tokens"]
+        self.n_sentences += batch_size
+        self.stats['processed_s'] += batch_size
+        self.stats['processed_w'] += n_tokens
+        
+        del batch
+        del loss
+        del nll_loss
+        del tensor
+    
     
     def mask_word(self, w):
         mask_index = self.TOTAL_TEXT.vocab.stoi[config.MASK]
@@ -497,6 +541,7 @@ class Enc_Dec_Trainer(Trainer):
                     l, List of integers (bsz)
                     span_len: int
         """
+
         pad_index = self.TOTAL_TEXT.vocab.stoi[config.PAD]
 
         if span_len <= 0:
@@ -552,14 +597,13 @@ class Enc_Dec_Trainer(Trainer):
                 "n_tokens":n_tokens, "tgt_pos":pos} 
 
         # check
-        src_max, src_min = src.max(), src.min()
         if config.use_cuda:
             batch = to_cuda(batch)
-
+        
         return batch 
 
-
-    def mass_step(self, raw_batch, lan):
+    '''
+    def mass_step(self, raw_batch, lan, empty_cache=False):
         """
         MASS pretrain step.
         raw_batch: torch.LongTensor (bsz, slen)
@@ -569,20 +613,20 @@ class Enc_Dec_Trainer(Trainer):
         self.criterion.train()
         if config.multi_gpu:
             self.net.module.train()
+        # Get a batch of input data
         mask = ( raw_batch != self.TOTAL_TEXT.vocab.stoi[config.PAD] )
         bsz = mask.size(0)
         batch = self.restricted_mask_sent(
                 raw_batch, mask.sum(-1).view(bsz).long().cpu().numpy().tolist(), config.span_len
                 )
+        bsz = raw_batch.size(0)
         
-        batch_size = batch["src"].size(0)
         del raw_batch
-        # Get a batch of input data
         
         # Network forward step
         tensor = self.net(
                 batch['src'], batch['src_mask'], batch['tgt'],
-                batch['tgt_mask'], tgt_pos=batch["tgt_pos"],
+                batch['tgt_mask'], #tgt_pos=batch["tgt_pos"],
                 src_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>'],
                 tgt_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>']
                 )
@@ -596,14 +640,18 @@ class Enc_Dec_Trainer(Trainer):
 
         # number of processed sentences / words
         n_tokens = batch["n_tokens"]
-        self.n_sentences += batch_size
-        self.stats['processed_s'] += batch_size
+        self.n_sentences += bsz
+        self.stats['processed_s'] += bsz
         self.stats['processed_w'] += n_tokens
         
         del batch
         del loss
         del nll_loss
         del tensor
+        
+        if empty_cache:
+            torch.cuda.empty_cache()
+    '''
 
 
     def valid_step(self):
@@ -637,12 +685,14 @@ class Enc_Dec_Trainer(Trainer):
 
 
                     # Network forward step
-                    inputs = {"src":None, "tgt":None, "src_mask":None, "tgt_mask":None}
-                    for k in inputs.keys():
-                        assert k in batch
-                        inputs[k] = batch[k]
-                    logits = net(**inputs)
-
+                    logits = net(
+                            src=batch["src"],
+                            src_mask=batch["src_mask"],
+                            tgt=batch["tgt"],
+                            tgt_mask=batch["tgt_mask"],
+                            src_lang=self.SRC_TEXT.vocab.stoi["<" + config.SRC_LAN.upper() + ">"],
+                            tgt_lang=self.TGT_TEXT.vocab.stoi["<" + config.TGT_LAN.upper()  + ">"]
+                            )
                     # loss
                     loss_inputs = {"logits":None, "target":None, "target_mask":None}
                     for k in loss_inputs.keys():
@@ -661,7 +711,6 @@ class Enc_Dec_Trainer(Trainer):
                     del logits
                     del loss
                     del nll_loss
-                    del inputs
                     del loss_inputs
                     del batch
                     #torch.cuda.empty_cache()
@@ -677,9 +726,6 @@ class Enc_Dec_Trainer(Trainer):
             return scores
         
         elif MODE == "MASS":
-            #self.iterators["valid"].tokens_per_batch = -1
-            #self.iterators["valid"].batch_size = 32
-            #data_iter = iter(self.iterators["valid"].get_iterator(True, True))
 
             n_words = 0
             xe_loss = 0
@@ -688,12 +734,10 @@ class Enc_Dec_Trainer(Trainer):
             scores = {}
             
             with torch.no_grad():
-                self.net.eval()
+                net = self.net.eval()
                 self.criterion.eval()
                 if config.multi_gpu:
                     net = self.net.module
-                else:
-                    net = self.net
                 
                 for direction, valid_iter in self.iterators["valid"].items():
                     src_lan, tgt_lan = direction.split('-')
@@ -708,15 +752,14 @@ class Enc_Dec_Trainer(Trainer):
                                 self.TOTAL_TEXT.vocab, self.TOTAL_TEXT.vocab
                                 )
 
-
                         # Network forward step
                         logits = net(
                                 src=batch["src"],
                                 src_mask=batch["src_mask"],
                                 tgt=batch["tgt"],
                                 tgt_mask=batch["tgt_mask"],
-                                src_lang=self.TOTAL_TEXT.vocab.stoi[src_lan],
-                                tgt_lang=self.TOTAL_TEXT.vocab.stoi[tgt_lan]
+                                src_lang=self.TOTAL_TEXT.vocab.stoi["<" + src_lan.upper() + ">"],
+                                tgt_lang=self.TOTAL_TEXT.vocab.stoi["<" + tgt_lan.upper() + ">"]
                                 )
 
                         # loss
@@ -732,14 +775,11 @@ class Enc_Dec_Trainer(Trainer):
                         # update stats
                         n_words += batch["n_tokens"]
                         xe_loss += nll_loss.item() * batch["n_tokens"]
-                        n_valid += (logits.max(-1)[1] == batch["target"]).sum().item()
-                        
-                        del logits
-                        del loss
-                        del nll_loss
-                        del loss_inputs
-                        del batch
+                        n_valid += (logits.max(-1)[1] == batch["target"]).sum().long().item()
 
+                        del batch, logits, loss, loss_inputs, nll_loss
+                        torch.cuda.empty_cache()
+                        
                     # compute perplexity and prediction accuracy
                     scores[direction.replace('-', '_') + '_ppl'] = np.exp(xe_loss / n_words)
                     scores[direction.replace('-', '_') + '_acc'] = 100. * n_valid / n_words

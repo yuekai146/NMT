@@ -100,7 +100,8 @@ class Encoder(nn.Module):
     def __init__(self, layer, N):
         super(Encoder, self).__init__()
         self.layers = clone(layer, N)
-        self.norm = Layer_Norm(layer.size)
+        #self.norm = Layer_Norm(layer.size)
+        self.norm = nn.LayerNorm(layer.size, eps=1e-12)
 
     def forward(self, x, mask):
         for layer in self.layers:
@@ -128,7 +129,8 @@ class Sublayer_Connection(nn.Module):
 
     def __init__(self, size, dropout):
         super(Sublayer_Connection, self).__init__()
-        self.norm = Layer_Norm(size)
+        #self.norm = Layer_Norm(size)
+        self.norm = nn.LayerNorm(size, eps=1e-12)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, sublayer):
@@ -157,7 +159,8 @@ class Decoder(nn.Module):
     def __init__(self, layer, N):
         super(Decoder, self).__init__()
         self.layers = clone(layer, N)
-        self.norm = Layer_Norm(layer.size)
+        #self.norm = Layer_Norm(layer.size)
+        self.norm = nn.LayerNorm(layer.size, eps=1e-12)
 
     def forward(self, x, memory, src_mask, tgt_mask, cache=None):
         for layer in self.layers:

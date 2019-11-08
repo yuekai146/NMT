@@ -6,7 +6,7 @@ import argparse
 import os
 import pickle
 import torch
-from dataset import ParallelDataset, Dataset, Text, Batch, Vocab 
+from dataset import ParallelDataset, MultiLingualDataset, Dataset, Text, Batch, Vocab 
 
 
 def MT_main():
@@ -184,55 +184,42 @@ def MASS_main():
 
         if config.multi_gpu == False or int(os.environ["NGPUS"]) == 1:
             # Single GPU, do not need to split dataset
-            data_iter = {}
-            for k, train_iter in trainer.iterators["train"].items():
-                data_iter[k] = iter(
-                        train_iter.get_iterator(
-                            shuffle=True, group_by_size=True,
-                            eos=True, bos=True
-                            )
-                        )
+            subset_batches = trainer.iterators["train"].get_batch_ids(
+                    shuffle=True, group_by_size=True
+                    )
+            data_iter = iter(trainer.iterators["train"].get_batches_iterator(subset_batches))
+            trainer.num_train = sum([len(b) for b in subset_batches]) * len(config.LANS)
         else:
             if params.local_rank == 0:
                 # Split dataset into NGPUS subsets, with the same number of batches
                 # Store NGPUS subsets in config.data_bin
-                for k, train_iter in trainer.iterators["train"].items():
-                    subset_batches = train_iter.get_batch_ids(
-                            shuffle=True, group_by_size=True,
-                            num_subsets=int(os.environ["NGPUS"])
-                            )
-                    
-                    for i_sub in range(len(subset_batches)):
-                        f = open(os.path.join(config.data_bin, k + "_" + "batches_" + str(i_sub)), 'wb')
-                        pickle.dump(subset_batches[i_sub], f)
-                        f.close()
+                subset_batches = trainer.iterators["train"].get_batch_ids(
+                        shuffle=True, group_by_size=True,
+                        num_subsets=int(os.environ["NGPUS"])
+                        )
+
+                for i_sub in range(len(subset_batches)):
+                    f = open(os.path.join(config.data_bin, "batches_" + str(i_sub)), 'wb')
+                    pickle.dump(subset_batches[i_sub], f)
+                    f.close()
 
             torch.distributed.barrier()
             # Each process reads its own subset 
-            data_iter = {}
-            n_batches = {}
-            trainer.num_train = 0
-            for k, train_iter in trainer.iterators["train"].items():
-                f = open(os.path.join(config.data_bin, k + "_" + "batches_" + str(params.local_rank)), 'rb')
-                subset_batches = pickle.load(f)
-                f.close()
-                n_batches[k] = len(subset_batches)
-                print("Language {}, Process {}, n_batches is {}".format(k, params.local_rank, n_batches[k]))
-                data_iter[k] = iter(train_iter.get_batches_iterator(subset_batches, bos=True, eos=True))
-                num_train = sum([len(b) for b in subset_batches])
-                trainer.num_train += num_train
+            f = open(os.path.join(config.data_bin, "batches_" + str(params.local_rank)), 'rb')
+            subset_batches = pickle.load(f)
+            f.close()
+            trainer.num_train = sum([len(b) for b in subset_batches]) * len(config.LANS)
 
-        trainer.valid_step()
-        min_n_batches = min(n_batches.values())
-        for i_batch in range(min_n_batches):
-            for k in data_iter.keys():
-                try:
-                    raw_batch = next(data_iter[k])
-                    trainer.mass_step(raw_batch, k)
+            data_iter = iter(trainer.iterators["train"].get_batches_iterator(subset_batches))
+        
+        for i_batch, raw_batch in enumerate(data_iter):
+            try:
+                for k in raw_batch.keys():
+                    trainer.mass_step(raw_batch[k], k)
                     trainer.iter()
-                    #torch.distributed.barrier()
-                except RuntimeError:
-                    continue
+                    torch.distributed.barrier()
+            except RuntimeError:
+                continue
 
         scores = trainer.valid_step()
         trainer.save_best_model(scores)

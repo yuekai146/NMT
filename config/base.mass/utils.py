@@ -1,5 +1,10 @@
 from common import config
+from contextlib import contextmanager
 from torch.autograd import Variable
+from torch import nn
+
+import copy
+import torch.distributed as dist
 import numpy as np
 import torch
 
@@ -175,7 +180,7 @@ def get_batch(src, tgt, src_vocab, tgt_vocab):
             subsequent_mask(tgt_in.size(-1)).type_as(tgt_mask.data)
             )
     target_mask = ( target != tgt_vocab.stoi[config.PAD] )
-    n_tokens = torch.sum(target_mask).item()
+    n_tokens = torch.sum(target_mask).long().item()
 
     batch = {"src":src, "tgt":tgt_in,
             "src_mask":src_mask, "tgt_mask":tgt_mask,

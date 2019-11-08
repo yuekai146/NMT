@@ -6,12 +6,14 @@
 #
 
 from common import config, MODE
+import copy
 import argparse
 import dill
 import math
 import numpy as np
 import os
 import pickle
+import random
 import torch
 
 
@@ -107,10 +109,21 @@ class Dataset(object):
             return sent_tensor, indices
 
 
-    def get_batches_iterator(self, batches, bos, eos, include_indices=False):
+    def get_batches_iterator(self, batches, bos, eos, include_indices=False, fixed_n_batches=None):
         """
         Return a sentences iterator, given the associated sentence batches.
         """
+        if fixed_n_batches is not None:
+            assert isinstance(fixed_n_batches, int)
+            n_rounds = fixed_n_batches // len(batches)
+            n_remainder = fixed_n_batches % len(batches)
+            new_batches = copy.deepcopy(batches)
+            for i in range(n_rounds-1):
+                random.shuffle(new_batches)
+                batches.extend(new_batches)
+            random.shuffle(new_batches)
+            batches.extend(new_batches[:n_remainder])
+            assert len(batches) == fixed_n_batches, "{}, {}".format(len(batches), fixed_n_batches)
 
         for sentence_ids in batches:
             if 0 < self.max_batch_size < len(sentence_ids):
@@ -168,7 +181,7 @@ class Dataset(object):
         return batches
 
 
-    def get_iterator(self, shuffle, group_by_size=False, bos=False, eos=False, include_indices=False):
+    def get_iterator(self, shuffle, group_by_size=False, bos=False, eos=False, include_indices=False, fixed_n_batches=None):
         """
         Return a sentences iterator.
         """
@@ -204,7 +217,7 @@ class Dataset(object):
         assert self.lengths[indices].sum() == sum([self.lengths[x].sum() for x in batches])
 
         # return the iterator
-        return self.get_batches_iterator(batches, bos, eos, include_indices)
+        return self.get_batches_iterator(batches, bos, eos, include_indices, fixed_n_batches)
 
 
 class ParallelDataset(Dataset):
@@ -320,6 +333,134 @@ class ParallelDataset(Dataset):
         return self.get_batches_iterator(batches)
 
 
+class MultiLingualDataset(Dataset):
+
+    def __init__(self, sent_dict, vocab):
+
+        self.bos_index = vocab.stoi[config.BOS]
+        self.eos_index = vocab.stoi[config.EOS]
+        self.pad_index = vocab.stoi[config.PAD]
+        self.mask_index = vocab.stoi[config.MASK]
+
+        self.batch_size = config.BATCH_SIZE
+        self.tokens_per_batch = config.tokens_per_batch
+        self.max_batch_size = config.max_batch_size
+
+        self.sent_dict = sent_dict
+        self.vocab = vocab
+        
+        sent_ = {}
+        for k, sent in self.sent_dict.items():
+            sent_[k] = []
+            for s in sent:
+                sent_[k].append([vocab.stoi[tok] if tok in vocab.stoi else vocab.stoi[config.UNK] for tok in s.split()])
+            sent_[k] = sorted(sent_[k], key=lambda s:len(s))
+        self.sent_dict = sent_
+
+        # Check number of sentences in all languages are equal
+        assert len(set([len(self.sent_dict[k]) for k in self.sent_dict.keys()])) <= 1
+        
+        self.lengths_dict = {}
+        for k, sent in self.sent_dict.items():
+            self.lengths_dict[k] = np.array([len(s) for s in sent])
+        
+
+    def __len__(self):
+        """
+        Number of sentences in the dataset.
+        """
+        assert len(set([len(self.sent_dict[k]) for k in self.sent_dict.keys()])) <= 1
+
+        for k, sent in self.sent_dict.items():
+            return len(sent)
+
+
+    def get_batches_iterator(self, batches):
+        """
+        Return a sentences iterator, given the associated sentence batches.
+        """
+
+        for sentence_ids in batches:
+            if 0 < self.max_batch_size < len(sentence_ids):
+                np.random.shuffle(sentence_ids)
+                sentence_ids = sentence_ids[:self.max_batch_size]
+            sents = {}
+            for k in self.sent_dict.keys():
+                sents[k] = self.batch_sentences(
+                        [self.sent_dict[k][idx] for idx in sentence_ids],
+                        bos=True, eos=True
+                        )
+            yield sents
+
+
+    def get_batch_ids(self, shuffle, group_by_size=False, num_subsets=None):
+        assert type(shuffle) is bool and type(group_by_size) is bool
+        assert group_by_size is False or shuffle is True
+        assert num_subsets is None or isinstance(num_subsets, int)
+
+        if num_subsets is not None:
+            assert num_subsets > 1
+
+        # sentence lengths
+        lengths = np.zeros(len(self))
+        for k, lengths_k in self.lengths_dict.items():
+            lengths += lengths_k
+
+        # select sentences to iterate over
+        if shuffle:
+            indices = np.random.permutation(len(self))
+        else:
+            indices = np.arange(len(self))
+
+        # group sentences by lengths
+        if group_by_size:
+            indices = indices[np.argsort(lengths[indices], kind='mergesort')]
+
+        # create batches - either have a fixed number of sentences, or a similar number of tokens
+        if self.tokens_per_batch == -1:
+            batches = np.array_split(indices, math.ceil(len(indices) * 1. / self.batch_size))
+        else:
+            batch_ids = np.cumsum(lengths[indices]) // self.tokens_per_batch
+            _, bounds = np.unique(batch_ids, return_index=True)
+            batches = [indices[bounds[i]:bounds[i + 1]] for i in range(len(bounds) - 1)]
+            if bounds[-1] < len(indices):
+                batches.append(indices[bounds[-1]:])
+
+        # optionally shuffle batches
+        if shuffle:
+            np.random.shuffle(batches)
+
+        if num_subsets is not None:
+            assert isinstance(num_subsets, int)
+            if len(batches) % num_subsets == 0:
+                subset_batch_num = len(batches) // num_subsets
+                subset_batches = [batches[i*subset_batch_num:(i+1)*subset_batch_num] for i in range(num_subsets)]
+            else:
+                n_remainder = num_subsets - len(batches) % num_subsets
+                subset_batch_num = ( len(batches) // num_subsets ) + 1
+                subset_batches = [batches[i*subset_batch_num:(i+1)*subset_batch_num] for i in range(num_subsets)]
+                for i in range(n_remainder):
+                    tmp_batch = copy.deepcopy(subset_batches[i][-1])
+                    l = len(tmp_batch)
+                    subset_batches[i][-1] = tmp_batch[:int(0.5 * l)]
+                    subset_batches[-1].append(tmp_batch[int(0.5*l):])
+            assert len(set([len(b) for b in subset_batches])) <= 1
+
+            batches = subset_batches
+
+        return batches
+
+
+    def get_iterator(self, shuffle, group_by_size=False):
+        """
+        Return a sentences iterator.
+        """
+        batches = self.get_batch_ids(shuffle=shuffle, group_by_size=group_by_size)
+
+        # return the iterator
+        return self.get_batches_iterator(batches)
+
+
 def get(params=None):
     
     def read_sents(fpath):
@@ -365,9 +506,7 @@ def get(params=None):
         for lan, raw_train_path in zip(config.LANS, config.MONO_RAW_TRAIN_PATH):
             sents[lan.lower()] = read_sents(raw_train_path)
             print("Read {} mono corpus from {}".format(lan, raw_train_path))
-        train_iter = {}
-        for k, v in sents.items():
-            train_iter[k] = Dataset(sents[k], TOTAL.vocab)
+        train_iter = MultiLingualDataset(sents, TOTAL.vocab)
 
         valid_iter = {}
         for direction in config.valid_directions.split(','):

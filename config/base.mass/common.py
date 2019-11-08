@@ -5,6 +5,7 @@ MODE = "MASS"
 
 
 class MT_Config:
+
     encoder_num_layers = 6
     decoder_num_layers = 6
     d_model = 1024
@@ -20,8 +21,11 @@ class MT_Config:
     EOS = "</s>"
     PAD = "<pad>"
     UNK = "<unk>"
+    MASK = "<mask>"
+    SRC_LAN = "en"
+    TGT_LAN = "de"
 
-    SPECIAL_TOKENS = [PAD, BOS, EOS, UNK]
+    SPECIAL_TOKENS = [PAD, BOS, EOS, UNK, MASK, "<" + SRC_LAN.upper() + ">", "<" + TGT_LAN.upper() + ">"]
     N_SPECIAL_TOKENS = len(SPECIAL_TOKENS)
     MAX_LEN = 250 
     
@@ -56,10 +60,6 @@ class MT_Config:
     tokens_per_batch = 3000 # if tokens_per_batch > 0, ignore BATCH_SIZE
     max_batch_size = 0
 
-    # Masked language model
-    word_mass = 0.5
-    span_len = 100000
-
     # For optimizer
     opt_warmup = 4000
     lr = 7e-4
@@ -87,7 +87,7 @@ class MT_Config:
     dump_path = "checkpoints/"
     reload_network_only = True
     clip_grad_norm = 0.0
-    accumulate_gradients = 1
+    accumulate_gradients = 2
     save_periodic = 1
     valid_metrics = {"ppl":-1}
     init_metric = -1e12
@@ -151,7 +151,7 @@ class MASS_Config:
     total_n_vocab = len(open(TOTAL_VOCAB_PATH, 'r').read().split('\n')[:-1]) + N_SPECIAL_TOKENS
     
     BATCH_SIZE = 128
-    tokens_per_batch = 3000 # if tokens_per_batch > 0, ignore BATCH_SIZE
+    tokens_per_batch = 2000 * len(LANS) # if tokens_per_batch > 0, ignore BATCH_SIZE
     max_batch_size = 0
 
     # Masked language model
@@ -172,6 +172,9 @@ class MASS_Config:
     fp16 = True # Whether to use fp16 training
     amp = 2 # Level of optimization
 
+    if fp16:
+        if total_n_vocab % 8 != 0:
+            total_n_vocab = (total_n_vocab // 8) * 8 + 8
     # For trainer
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
@@ -180,7 +183,7 @@ class MASS_Config:
     dump_path = "checkpoints/"
     reload_network_only = True
     clip_grad_norm = 0.0
-    accumulate_gradients = 1
+    accumulate_gradients = 2
     save_periodic = 1
     valid_metrics = {}
     for direction in valid_directions.split(','):
