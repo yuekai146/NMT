@@ -5,6 +5,7 @@ from utils import create_logger
 import argparse
 import os
 import pickle
+import random
 import torch
 from dataset import ParallelDataset, MultiLingualDataset, Dataset, Text, Batch, Vocab 
 
@@ -73,6 +74,9 @@ def MT_main():
             os.path.join(config.dump_path, 'train.log'),
             rank=getattr(params, 'local_rank', 0)
             )
+    if params.eval_only:
+        trainer.valid_step()
+        exit()
 
     # Start epoch training
     for i_epoch in range(trainer.epoch_size):
@@ -140,6 +144,9 @@ def MASS_main():
     parser.add_argument('--epoch_size', default=None, type=int,
             help="Maximum train epochs"
             )
+    parser.add_argument('--eval_only', action="store_true",
+            help="Only perform evaluation"
+            )
     params = parser.parse_args()
 
     if params.continue_path is not None:
@@ -160,6 +167,7 @@ def MASS_main():
         torch.distributed.init_process_group(backend="nccl",  init_method='env://')
     trainer = Enc_Dec_Trainer(params)
 
+
     # Check whether dump_path exists, if not create one
     if params.local_rank == 0 or config.multi_gpu == False:
         if os.path.exists(config.dump_path) == False:
@@ -176,6 +184,10 @@ def MASS_main():
             os.path.join(config.dump_path, 'train.log'),
             rank=getattr(params, 'local_rank', 0)
             )
+    
+    if params.eval_only:
+        trainer.valid_step()
+        exit()
 
     # Start epoch training
     for i_epoch in range(trainer.epoch_size):
@@ -214,15 +226,17 @@ def MASS_main():
         
         for i_batch, raw_batch in enumerate(data_iter):
             try:
-                for k in raw_batch.keys():
+                keys = list(raw_batch.keys())
+                random.shuffle(keys)
+                for k in keys:
                     trainer.mass_step(raw_batch[k], k)
                     trainer.iter()
                     torch.distributed.barrier()
             except RuntimeError:
                 continue
 
-        scores = trainer.valid_step()
-        trainer.save_best_model(scores)
+        #scores = trainer.valid_step()
+        #trainer.save_best_model(scores)
         trainer.save_periodic()
         trainer.end_epoch(None)
         torch.distributed.barrier()

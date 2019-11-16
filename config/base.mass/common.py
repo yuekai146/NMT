@@ -101,16 +101,19 @@ class MT_Config:
 class MASS_Config:
     encoder_num_layers = 6
     decoder_num_layers = 6
-    d_model = 1024
-    d_ff = 4096
-    num_heads = 16
+    d_model = 512
+    d_ff = 2048
+    num_heads = 8
     dropout = 0.1
-    label_smoothing = 0.1
+    label_smoothing = 0.0
     share_decoder_generator_embed = True
     share_all_embeddings = True
     gelu_activation = True
 
     LANS = ['EN', 'DE']
+    LANG2IDS = {}
+    for i, k in enumerate(LANS):
+        LANG2IDS[k] = i 
     BOS = "<s>"
     EOS = "</s>"
     PAD = "<pad>"
@@ -151,7 +154,7 @@ class MASS_Config:
     total_n_vocab = len(open(TOTAL_VOCAB_PATH, 'r').read().split('\n')[:-1]) + N_SPECIAL_TOKENS
     
     BATCH_SIZE = 128
-    tokens_per_batch = 2000 * len(LANS) # if tokens_per_batch > 0, ignore BATCH_SIZE
+    tokens_per_batch = 3000 * len(LANS) # if tokens_per_batch > 0, ignore BATCH_SIZE
     max_batch_size = 0
 
     # Masked language model
@@ -161,8 +164,8 @@ class MASS_Config:
 
     # For optimizer
     opt_warmup = 4000
-    lr = 7e-4
-    init_lr = 1e-7
+    lr = 1e-4
+    init_lr = None
     beta1 = 0.9
     beta2 = 0.98
     weight_decay = 0.0
@@ -178,12 +181,13 @@ class MASS_Config:
     # For trainer
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
-    epoch_size = 150
+    epoch_size = 50
     continue_path = None
     dump_path = "checkpoints/"
-    reload_network_only = True
+    reload_network_only = False
+    optimizer_only = True
     clip_grad_norm = 0.0
-    accumulate_gradients = 2
+    accumulate_gradients = 1
     save_periodic = 1
     valid_metrics = {}
     for direction in valid_directions.split(','):

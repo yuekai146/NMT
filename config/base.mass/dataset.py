@@ -354,7 +354,7 @@ class MultiLingualDataset(Dataset):
             sent_[k] = []
             for s in sent:
                 sent_[k].append([vocab.stoi[tok] if tok in vocab.stoi else vocab.stoi[config.UNK] for tok in s.split()])
-            sent_[k] = sorted(sent_[k], key=lambda s:len(s))
+            #sent_[k] = sorted(sent_[k], key=lambda s:len(s))
         self.sent_dict = sent_
 
         # Check number of sentences in all languages are equal
@@ -501,6 +501,12 @@ def get(params=None):
         return train_iter, valid_iter, SRC, TGT
 
     elif MODE == "MASS":
+        if params is not None:
+            DATA_PATH = config.DATA_PATH if params.DATA_PATH is None else params.DATA_PATH
+            config.MONO_RAW_TRAIN_PATH = []
+            for lan in config.LANS:
+                config.MONO_RAW_TRAIN_PATH.append(DATA_PATH + '/mono.' + lan.lower())
+            config.TOTAL_VOCAB_PATH = DATA_PATH + "/vocab.total"
         TOTAL = Text(Vocab(config.TOTAL_VOCAB_PATH), False, False)
         sents = {}
         for lan, raw_train_path in zip(config.LANS, config.MONO_RAW_TRAIN_PATH):
@@ -552,21 +558,27 @@ def load():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--store', action="store_true", help="Store preprocessed dataset and vocab")
-    parser.add_argument('--test', action='store_true', help="Test dataset code")
-    parser.add_argument('--SRC_RAW_TRAIN_PATH', default=None, type=str, help="Path to store train source text")
-    parser.add_argument('--TGT_RAW_TRAIN_PATH', default=None, type=str, help="Path to store train target text")
-    parser.add_argument('--SRC_RAW_VALID_PATH', default=None, type=str, help="Path to store validation source text")
-    parser.add_argument('--TGT_RAW_VALID_PATH', default=None, type=str, help="Path to store validation target text")
-    parser.add_argument('--SRC_VOCAB_PATH', default=None, type=str, help="Path to store source vocab")
-    parser.add_argument('--TGT_VOCAB_PATH', default=None, type=str, help="Path to store target vocab")
-    parser.add_argument('--data_bin', default=None, type=str, help="Path to store binarized data")
-    args = parser.parse_args()
     
     if MODE == "MT":
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--store', action="store_true", help="Store preprocessed dataset and vocab")
+        parser.add_argument('--test', action='store_true', help="Test dataset code")
+        parser.add_argument('--SRC_RAW_TRAIN_PATH', default=None, type=str, help="Path to store train source text")
+        parser.add_argument('--TGT_RAW_TRAIN_PATH', default=None, type=str, help="Path to store train target text")
+        parser.add_argument('--SRC_RAW_VALID_PATH', default=None, type=str, help="Path to store validation source text")
+        parser.add_argument('--TGT_RAW_VALID_PATH', default=None, type=str, help="Path to store validation target text")
+        parser.add_argument('--SRC_VOCAB_PATH', default=None, type=str, help="Path to store source vocab")
+        parser.add_argument('--TGT_VOCAB_PATH', default=None, type=str, help="Path to store target vocab")
+        parser.add_argument('--data_bin', default=None, type=str, help="Path to store binarized data")
+        args = parser.parse_args()
         train_iter, valid_iter, SRC_TEXT, TGT_TEXT = get(args)
     elif MODE == "MASS":
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--store', action="store_true", help="Store preprocessed dataset and vocab")
+        parser.add_argument('--test', action='store_true', help="Test dataset code")
+        parser.add_argument('--DATA_PATH', default=None, type=str, help="Path of original corpus")
+        parser.add_argument('--data_bin', default=None, type=str, help="Path to store binarized data")
+        args = parser.parse_args()
         train_iter, valid_iter, TOTAL_TEXT = get(args)
     
     if args.test:

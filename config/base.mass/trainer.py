@@ -132,7 +132,7 @@ class Trainer(object):
         self.last_time = time.time()
 
         # reload potential checkpoints
-        self.reload_checkpoint(network_only=config.reload_network_only)
+        self.reload_checkpoint(network_only=config.reload_network_only, optimizer_only=config.optimizer_only)
         print("Process {}, trainer initialized.".format(params.local_rank))
 
 
@@ -262,7 +262,7 @@ class Trainer(object):
         torch.save(ckpt, path)
 
 
-    def reload_checkpoint(self, network_only=False):
+    def reload_checkpoint(self, network_only=False, optimizer_only=False):
         """
         done
         Reload a checkpoint if we find one.
@@ -278,16 +278,16 @@ class Trainer(object):
 
             if network_only == False:
                 # reload optimizers
-                self.opt.optimizer.load_state_dict(ckpt["opt"]["optimizer_state_dict"])
+                # self.opt.optimizer.load_state_dict(ckpt["opt"]["optimizer_state_dict"])
                 for k in ckpt["opt"].keys():
                     if k != "optimizer_state_dict":
                         setattr(self.opt, k, ckpt["opt"][k])
-
-                # reload main metrics
-                self.epoch = ckpt['epoch'] + 1
-                self.n_total_iter = ckpt['n_total_iter']
-                self.best_metrics = ckpt['best_metrics']
-                self.early_stopping_metrics = ckpt['early_stopping_metrics']
+                if optimizer_only == False:
+                    # reload main metrics
+                    self.epoch = ckpt['epoch'] + 1
+                    self.n_total_iter = ckpt['n_total_iter']
+                    self.best_metrics = ckpt['best_metrics']
+                    self.early_stopping_metrics = ckpt['early_stopping_metrics']
             
             logger.warning(f"Checkpoint reloaded. Resuming at epoch {self.epoch} / iteration {self.n_total_iter} ...")
 
@@ -421,20 +421,21 @@ class Enc_Dec_Trainer(Trainer):
         self.criterion.train()
         if config.multi_gpu:
             self.net.module.train()
-        
         bsz = raw_batch.size(0)
         l = ( raw_batch != self.TOTAL_TEXT.vocab.stoi[config.PAD] ).sum(-1).view(bsz).long().numpy().tolist()
         batch = self.restricted_mask_sent(raw_batch, l)
+
         batch_size = batch["src"].size(0)
         del raw_batch
         # Get a batch of input data
         
         # Network forward step
         tensor = self.net(
-                batch['src'], batch['src_mask'], batch['tgt'], batch['tgt_mask'],
-                tgt_pos=batch["tgt_pos"],
+                batch["src"], batch["src_mask"], batch["tgt"], batch["tgt_mask"],
                 src_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>'],
-                tgt_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>']
+                tgt_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>'],
+                tgt_pos=batch["tgt_pos"], enc_mask=batch["enc_mask"],
+                decoder_lang_id=config.LANG2IDS[lan.upper()]
                 )
 
         # loss
@@ -454,7 +455,6 @@ class Enc_Dec_Trainer(Trainer):
         del loss
         del nll_loss
         del tensor
-    
     
     def mask_word(self, w):
         mask_index = self.TOTAL_TEXT.vocab.stoi[config.MASK]
@@ -543,6 +543,7 @@ class Enc_Dec_Trainer(Trainer):
         """
 
         pad_index = self.TOTAL_TEXT.vocab.stoi[config.PAD]
+        mask_index = self.TOTAL_TEXT.vocab.stoi[config.MASK]
 
         if span_len <= 0:
             span_len = 1
@@ -580,7 +581,10 @@ class Enc_Dec_Trainer(Trainer):
         src, tgt, target = x1, x2, y
         
         # Create network inputs
-        src_mask = (src != pad_index).unsqueeze(-2)
+        src_mask = (src != pad_index)
+        enc_mask = (src != mask_index) & src_mask
+        src_mask = src_mask.unsqueeze(-2)
+        enc_mask = enc_mask.unsqueeze(-2)
         bsz = tgt.size(0)
 
         # Create target mask
@@ -589,69 +593,20 @@ class Enc_Dec_Trainer(Trainer):
                 subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data)
                 )
         target_mask = ( target != pad_index )
-        n_tokens = torch.sum(target_mask).item()
+        n_tokens = torch.sum(target_mask).long().item()
 
         batch = {"src":src, "tgt":tgt,
                 "src_mask":src_mask, "tgt_mask":tgt_mask,
                 "target":target, "target_mask":target_mask,
-                "n_tokens":n_tokens, "tgt_pos":pos} 
+                "n_tokens":n_tokens, "tgt_pos":pos,
+                "enc_mask":enc_mask
+                } 
 
         # check
         if config.use_cuda:
             batch = to_cuda(batch)
         
         return batch 
-
-    '''
-    def mass_step(self, raw_batch, lan, empty_cache=False):
-        """
-        MASS pretrain step.
-        raw_batch: torch.LongTensor (bsz, slen)
-        lan: str, must be in config.LANS
-        """
-        self.net.train()
-        self.criterion.train()
-        if config.multi_gpu:
-            self.net.module.train()
-        # Get a batch of input data
-        mask = ( raw_batch != self.TOTAL_TEXT.vocab.stoi[config.PAD] )
-        bsz = mask.size(0)
-        batch = self.restricted_mask_sent(
-                raw_batch, mask.sum(-1).view(bsz).long().cpu().numpy().tolist(), config.span_len
-                )
-        bsz = raw_batch.size(0)
-        
-        del raw_batch
-        
-        # Network forward step
-        tensor = self.net(
-                batch['src'], batch['src_mask'], batch['tgt'],
-                batch['tgt_mask'], #tgt_pos=batch["tgt_pos"],
-                src_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>'],
-                tgt_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>']
-                )
-
-        # loss
-        loss, nll_loss = self.criterion(tensor, batch['target'], batch['target_mask'])
-        self.stats[('MASS-%s-loss' % (lan))].append(loss.item())
-        self.stats[('MASS-%s-ppl' % (lan))].append(nll_loss.exp().item())
-        # optimize
-        self.optimize(loss)
-
-        # number of processed sentences / words
-        n_tokens = batch["n_tokens"]
-        self.n_sentences += bsz
-        self.stats['processed_s'] += bsz
-        self.stats['processed_w'] += n_tokens
-        
-        del batch
-        del loss
-        del nll_loss
-        del tensor
-        
-        if empty_cache:
-            torch.cuda.empty_cache()
-    '''
 
 
     def valid_step(self):
@@ -759,7 +714,8 @@ class Enc_Dec_Trainer(Trainer):
                                 tgt=batch["tgt"],
                                 tgt_mask=batch["tgt_mask"],
                                 src_lang=self.TOTAL_TEXT.vocab.stoi["<" + src_lan.upper() + ">"],
-                                tgt_lang=self.TOTAL_TEXT.vocab.stoi["<" + tgt_lan.upper() + ">"]
+                                tgt_lang=self.TOTAL_TEXT.vocab.stoi["<" + tgt_lan.upper() + ">"],
+                                decoder_lang_id=config.LANG2IDS[tgt_lan.upper()]
                                 )
 
                         # loss
@@ -791,7 +747,7 @@ class Enc_Dec_Trainer(Trainer):
 
 
 if __name__ == "__main__":
-    from dataset import ParallelDataset, Dataset, Text, Batch, Vocab 
+    from dataset import MultiLingualDataset, ParallelDataset, Dataset, Text, Batch, Vocab 
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int, default=0,
@@ -815,34 +771,52 @@ if __name__ == "__main__":
         torch.distributed.init_process_group(backend="nccl",  init_method='env://')
     trainer = Enc_Dec_Trainer(params)
 
-    data_iter = {}
-    for k, train_iter in trainer.iterators["train"].items():
-        data_iter[k] = iter(
-                train_iter.get_iterator(
-                    shuffle=True, group_by_size=True,
-                    eos=True, bos=True
-                    )
+    data_iter = iter(
+            trainer.iterators["train"].get_iterator(
+                shuffle=True, group_by_size=True,
                 )
-    print(max(trainer.iterators['train']['en'].lengths))
+            )
+    
+    vocab = trainer.TOTAL_TEXT.vocab 
     '''
-    import model
-    net, criterion = model.get()
-    print("start")
-    for i_batch in range(1000):
-        raw_batch = next(data_iter["en"])
-        mask = ( raw_batch != trainer.TOTAL_TEXT.vocab.stoi[config.PAD] )
-        bsz = mask.size(0)
-        batch = trainer.restricted_mask_sent(
-                raw_batch, mask.sum(-1).view(bsz).long().cpu().numpy().tolist(), config.span_len
-                )
-        logits = net(
-                batch['src'], batch['src_mask'], batch['tgt'],
-                batch['tgt_mask'], tgt_pos=batch["tgt_pos"],
-                src_lang=trainer.TOTAL_TEXT.vocab.stoi['<' + 'EN' + '>'],
-                tgt_lang=trainer.TOTAL_TEXT.vocab.stoi['<' + 'EN' + '>']
-                )
-        loss, nll_loss = criterion(logits, batch['target'], batch['target_mask'])
-        trainer.optimize(loss)
-        print(nll_loss.item())
-    print("end")
+    raw_batch = next(data_iter)
+    mask = ( raw_batch['en'] != vocab.stoi[config.PAD] )
+    bsz = mask.size(0)
+    batch = trainer.restricted_mask_sent(
+            raw_batch['en'], mask.sum(-1).view(bsz).long().cpu().numpy().tolist(), config.span_len
+            )
+    idx = np.random.randint(bsz, size=(1))[0]
+    src = batch['src'][idx].cpu().numpy().tolist()
+    tgt = batch['tgt'][idx].cpu().numpy().tolist()
+    target = batch['target'][idx].cpu().numpy().tolist()
+    tgt_pos = batch['tgt_pos'][idx].cpu().numpy().tolist()
+    assert len(target) == len(tgt)
+    assert len(tgt) == len(tgt_pos)
+
+    print("SRC:", ' '.join([vocab.itos[idx] for idx in src]).replace("<pad>", ""))
+    print("TGT:", ' '.join([vocab.itos[idx] for idx in tgt]).replace("<pad>", ""))
+    print("TARGET:", ' '.join([vocab.itos[idx] for idx in target]).replace("<pad>", ""))
+    print(tgt_pos)
     '''
+
+    for direction, valid_iter in trainer.iterators["valid"].items():
+        src_lan, tgt_lan = direction.split('-')
+        valid_iter.tokens_per_batch = -1
+        valid_iter.batch_size = 32
+        data_iter = iter(valid_iter.get_iterator(True, True))
+        print(direction)
+        src_lang=vocab.stoi["<" + src_lan.upper() + ">"]
+        tgt_lang=vocab.stoi["<" + tgt_lan.upper() + ">"]
+        print(src_lan, src_lang)
+        print(tgt_lan, tgt_lang)
+        
+        for i_batch, raw_batch in enumerate(data_iter):
+            # generate batch
+            src, tgt = raw_batch.src, raw_batch.tgt
+            bsz = src.size(0)
+            idx = np.random.randint(bsz, size=(1))[0]
+            src = src[idx].cpu().numpy().tolist()
+            tgt = tgt[idx].cpu().numpy().tolist()
+            print("{}:".format(src_lan), ' '.join([vocab.itos[idx] for idx in src]).replace("<pad>", ""))
+            print("{}:".format(tgt_lan), ' '.join([vocab.itos[idx] for idx in tgt]).replace("<pad>", ""))
+            break

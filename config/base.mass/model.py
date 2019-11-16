@@ -39,7 +39,8 @@ class Encoder_Decoder(nn.Module):
     def forward(
             self, src, src_mask, tgt, tgt_mask,
             log_prob=True, src_pos=None, tgt_pos=None,
-            src_lang=None, tgt_lang=None
+            src_lang=None, tgt_lang=None, enc_mask=None,
+            decoder_lang_id=None
             ):
         if src_pos is None and tgt_pos is None and src_lang is None and tgt_lang is None:
             return self.generator(
@@ -52,10 +53,17 @@ class Encoder_Decoder(nn.Module):
             enc_out = self.encoder(src_emb, src_mask)
 
             tgt_emb = self.tgt_emb[0](tgt, lang=tgt_lang)
-            tgt_emb = self.tgt_emb[1](tgt_emb,pos=tgt_pos)
-            return self.generator(
-                    self.decoder(tgt_emb, enc_out, src_mask, tgt_mask)
-                    )
+            tgt_emb = self.tgt_emb[1](tgt_emb, pos=tgt_pos)
+
+            if enc_mask is None:
+                return self.generator(
+                        self.decoder(tgt_emb, enc_out, src_mask, tgt_mask, lang_id=decoder_lang_id)
+                        )
+            else:
+                return self.generator(
+                        self.decoder(tgt_emb, enc_out, enc_mask, tgt_mask, lang_id=decoder_lang_id)
+                        )
+                
 
     def encode(self, src, src_mask, src_lang=None, src_pos=None):
         if src_lang is None:
@@ -65,15 +73,15 @@ class Encoder_Decoder(nn.Module):
             src_emb = self.src_emb[1](src_emb, pos=src_pos)
             return self.encoder(src_emb, src_mask)
 
-    def decode(self, memory, src_mask, tgt, tgt_mask, cache=None, tgt_lang=None, tgt_pos=None):
+    def decode(self, memory, src_mask, tgt, tgt_mask, cache=None, tgt_lang=None, tgt_pos=None, decoder_lang_id=None):
         if cache is not None and 'cur_len' in cache:
             x = self.tgt_emb[0](tgt, lang=tgt_lang)
             x = self.tgt_emb[1](x, cache['cur_len'], pos=tgt_pos)
-            return self.decoder(x, memory, src_mask, tgt_mask, cache)
+            return self.decoder(x, memory, src_mask, tgt_mask, cache, decoder_lang_id)
         else:
             x = self.tgt_emb[0](tgt, lang=tgt_lang)
             x = self.tgt_emb[1](x, pos=tgt_pos)
-            return self.decoder(x, memory, src_mask, tgt_mask, cache)
+            return self.decoder(x, memory, src_mask, tgt_mask, cache, decoder_lang_id)
 
 
 class Generator(nn.Module):
@@ -162,9 +170,9 @@ class Decoder(nn.Module):
         #self.norm = Layer_Norm(layer.size)
         self.norm = nn.LayerNorm(layer.size, eps=1e-12)
 
-    def forward(self, x, memory, src_mask, tgt_mask, cache=None):
+    def forward(self, x, memory, src_mask, tgt_mask, cache=None, lang_id=None):
         for layer in self.layers:
-            x = layer(x, memory, src_mask, tgt_mask, cache)
+            x = layer(x, memory, src_mask, tgt_mask, cache, lang_id)
         return self.norm(x)
 
 
@@ -179,9 +187,9 @@ class Decoder_Layer(nn.Module):
         self.sublayers = clone(Sublayer_Connection(size, dropout), 3)
         self.size = size
 
-    def forward(self, x, memory, src_mask, tgt_mask, cache=None):
+    def forward(self, x, memory, src_mask, tgt_mask, cache=None, lang_id=None):
         x = self.sublayers[0](x, lambda x: self.self_attn(x, None, None, tgt_mask, cache))
-        x = self.sublayers[1](x, lambda x: self.src_attn(x, memory, memory, src_mask, cache))
+        x = self.sublayers[1](x, lambda x: self.src_attn(x, memory, memory, src_mask, cache, lang_id))
         x = self.sublayers[2](x, self.feed_forward)
         return x
 
@@ -203,7 +211,7 @@ def attention(query, key, value, mask=None, dropout=None):
 
 class Multi_Head_Attention(nn.Module):
 
-    def __init__(self, d_model, h, dropout=0.1):
+    def __init__(self, d_model, h, dropout=0.1, n_langs=None):
         super(Multi_Head_Attention, self).__init__()
         assert d_model % h == 0
         self.layer_id = None
@@ -213,11 +221,18 @@ class Multi_Head_Attention(nn.Module):
         self.q_lin = nn.Linear(d_model, d_model)
         self.k_lin = nn.Linear(d_model, d_model)
         self.v_lin = nn.Linear(d_model, d_model)
-        self.out_lin = nn.Linear(d_model, d_model)
+
+        if n_langs is None:
+            self.out_lin = nn.Linear(d_model, d_model)
+        else:
+            self.out_lin = nn.ModuleList()
+            for i in range(n_langs):
+                self.out_lin.append(nn.Linear(d_model, d_model))
+        self.n_langs = n_langs
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, query, key=None, value=None, mask=None, cache=None):
+    def forward(self, query, key=None, value=None, mask=None, cache=None, segment_label=None):
         if mask is not None:
             mask = mask.unsqueeze(1)
         n_batches = query.size(0)
@@ -261,8 +276,12 @@ class Multi_Head_Attention(nn.Module):
                 
             output  = attention(q, key, value, mask, self.dropout)
         output = unshape(output)
-
-        return self.out_lin(output)
+        
+        if self.n_langs is None:
+            return self.out_lin(output)
+        else:
+            assert segment_label is not None
+            return self.out_lin[segment_label](output)
 
 
 class Positionwise_Feed_Forward(nn.Module):
@@ -380,21 +399,22 @@ def dummpy_input():
 
 def get():
     c = copy.deepcopy
-    attn = Multi_Head_Attention(config.d_model, config.num_heads)
+    src_attn = Multi_Head_Attention(config.d_model, config.num_heads, n_langs=len(config.LANS))
+    self_attn = Multi_Head_Attention(config.d_model, config.num_heads)
     ff = Positionwise_Feed_Forward(config.d_model, config.d_ff, config.dropout, config.gelu_activation)
     position = Positional_Embeddings(config.d_model, config.dropout)
     if MODE == "MT":
         net = Encoder_Decoder(
-                Encoder(Encoder_Layer(config.d_model, c(attn), c(ff), config.dropout), config.encoder_num_layers),
-                Decoder(Decoder_Layer(config.d_model, c(attn), c(attn), c(ff), config.dropout), config.decoder_num_layers),
+                Encoder(Encoder_Layer(config.d_model, c(self_attn), c(ff), config.dropout), config.encoder_num_layers),
+                Decoder(Decoder_Layer(config.d_model, c(self_attn), c(src_attn), c(ff), config.dropout), config.decoder_num_layers),
                 nn.Sequential(Embeddings(config.d_model, config.src_n_vocab), c(position)),
                 nn.Sequential(Embeddings(config.d_model, config.tgt_n_vocab), c(position)),
                 Generator(config.d_model, config.tgt_n_vocab)
                 )
     elif MODE == "MASS":
         net = Encoder_Decoder(
-                Encoder(Encoder_Layer(config.d_model, c(attn), c(ff), config.dropout), config.encoder_num_layers),
-                Decoder(Decoder_Layer(config.d_model, c(attn), c(attn), c(ff), config.dropout), config.decoder_num_layers),
+                Encoder(Encoder_Layer(config.d_model, c(self_attn), c(ff), config.dropout), config.encoder_num_layers),
+                Decoder(Decoder_Layer(config.d_model, c(self_attn), c(src_attn), c(ff), config.dropout), config.decoder_num_layers),
                 nn.Sequential(Embeddings(config.d_model, config.total_n_vocab), c(position)),
                 nn.Sequential(Embeddings(config.d_model, config.total_n_vocab), c(position)),
                 Generator(config.d_model, config.total_n_vocab)
