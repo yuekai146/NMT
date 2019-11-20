@@ -15,10 +15,10 @@ CLEAN=$SCRIPTS/training/clean-corpus-n.perl
 FAIRSEQ_PATH=/data/fairseq
 BPEROOT=/data/fastBPE
 
-ORIG_SRC=../../data/de-en/wmt17_de_en/train.de
-ORIG_TGT=../../data/de-en/wmt17_de_en/train.en
-TEST_INPUT=../../data/de-en/wmt17_de_en/test.de
-TEST_REF=../../data/de-en/wmt17_de_en/test.en
+ORIG_SRC=../../data/defr-en/train.de
+ORIG_TGT=../../data/defr-en/train.en
+TEST_INPUT=../../data/defr-en/test.de
+TEST_REF=../../data/defr-en/test.en
 
 function Active_NMT () {
 	local ACTIVE_FUNC_1=$1
@@ -133,12 +133,3 @@ function main () {
 
 
 main
-
-#RAN=random
-#DEN=dden
-#i=0
-
-#python3 active.py modify -U $U$i -L $L$i.$SRC,$L$i.$TGT --oracle $ORACLE$i -tb $TOK_BUDGET \
-#			-OU $U$((i+1)) -OL $L$((i+1)).$SRC,$L$((i+1)).$TGT \
-#			-OO $ORACLE$((i+1)) -AO1 $ACTIVE_OUT$RAN -AO2 $ACTIVE_OUT$DEN 
-

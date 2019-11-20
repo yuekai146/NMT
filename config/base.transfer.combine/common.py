@@ -21,17 +21,17 @@ class Config:
     MAX_LEN = 250 
     
     # data paths
-    DATA_PATH="../../data/de-en"
-    SRC_RAW_TRAIN_PATH = DATA_PATH + "/wmt17_de_en/train.de"
-    TGT_RAW_TRAIN_PATH = DATA_PATH + "/wmt17_de_en/train.en"
-    SRC_RAW_VALID_PATH = DATA_PATH + "/wmt17_de_en/valid.de"
-    TGT_RAW_VALID_PATH = DATA_PATH + "/wmt17_de_en/valid.en"
+    DATA_PATH="../../data/defr-en"
+    SRC_RAW_TRAIN_PATH = DATA_PATH + "/train.de"
+    TGT_RAW_TRAIN_PATH = DATA_PATH + "/train.en"
+    SRC_RAW_VALID_PATH = DATA_PATH + "/valid.de"
+    TGT_RAW_VALID_PATH = DATA_PATH + "/valid.en"
     if share_all_embeddings:
-        SRC_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.total"
-        TGT_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.total"
+        SRC_VOCAB_PATH = DATA_PATH + "/vocab.total"
+        TGT_VOCAB_PATH = DATA_PATH + "/vocab.total"
     else:
-        SRC_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.de"
-        TGT_VOCAB_PATH = DATA_PATH + "/wmt17_de_en/vocab.en"
+        SRC_VOCAB_PATH = DATA_PATH + "/vocab.de"
+        TGT_VOCAB_PATH = DATA_PATH + "/vocab.en"
 
     data_bin = "data_bin/"
     train_iter_dump_path = data_bin + "train_iter"
@@ -85,7 +85,7 @@ class Config:
     print_interval = 5
     # To early stop if validation performance did not
     # improve for decrease_counts_max epochs
-    decrease_counts_max = 15
+    decrease_counts_max = 25
     stopping_criterion = "ppl"
 
 config = Config()
