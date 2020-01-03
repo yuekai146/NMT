@@ -86,7 +86,7 @@ function process_iwslt () {
 
 
 function process_wmt () {
-	BPE_TOKENS=32000
+	BPE_TOKENS=60000
 	
 	FILES=(
 	    "training-parallel-europarl-v7.tgz"
@@ -102,7 +102,7 @@ function process_wmt () {
 	)
 
 	OUTDIR=wmt17_de_en
-	BASE_DIR=/data/NMT/data/de-en/wmt17_de_en
+	BASE_DIR=/data/NMT/data/de-en/tmp
 
 	if [ ! -d "$SCRIPTS" ]; then
 	    echo "Please set SCRIPTS variable correctly to point to Moses scripts."
