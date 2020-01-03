@@ -345,7 +345,7 @@ def translate(args, net, src_vocab, tgt_vocab):
     if args.tokens_per_batch is not None:
         infer_dataset.tokens_per_batch = args.tokens_per_batch
 
-    infer_dataiter = iter(infer_dataset.get_iterator(True, True))
+    infer_dataiter = iter(infer_dataset.get_iterator(False, True))
 
     for raw_batch in infer_dataiter:
         src_mask = (raw_batch.src != src_vocab.stoi[config.PAD]).unsqueeze(-2)
@@ -382,8 +382,8 @@ def main():
     parser.add_argument('--greedy', action='store_true')
     parser.add_argument('--src_lan', type=str, default="en")
     parser.add_argument('--tgt_lan', type=str, default="de")
-    parser.add_argument('--gen_a', type=float, default=1.5)
-    parser.add_argument('--gen_b', type=int, default=10)
+    parser.add_argument('--gen_a', type=float, default=1.3)
+    parser.add_argument('--gen_b', type=int, default=5)
 
     args = parser.parse_args()
     args.use_cuda = ( args.no_cuda == False ) and torch.cuda.is_available()

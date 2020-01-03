@@ -48,7 +48,6 @@ class MT_Config:
     src_vocab_dump_path = data_bin + "SRC"
     tgt_vocab_dump_path = data_bin + "TGT"
 
-    # Wrong n_vocab, should minus 1
     src_n_vocab = len(open(SRC_VOCAB_PATH, 'r').read().split('\n')) - 1 + N_SPECIAL_TOKENS
     tgt_n_vocab = len(open(TGT_VOCAB_PATH, 'r').read().split('\n')) - 1 + N_SPECIAL_TOKENS
     
@@ -150,7 +149,6 @@ class MASS_Config:
     valid_iter_dump_path = data_bin + "valid_iter"
     total_vocab_dump_path = data_bin + "TOTAL"
 
-    # Wrong n_vocab, should minus 1
     total_n_vocab = len(open(TOTAL_VOCAB_PATH, 'r').read().split('\n')[:-1]) + N_SPECIAL_TOKENS
     
     BATCH_SIZE = 128
@@ -181,7 +179,7 @@ class MASS_Config:
     # For trainer
     use_cuda = torch.cuda.is_available()
     multi_gpu = True
-    epoch_size = 50
+    epoch_size = 5
     continue_path = None
     dump_path = "checkpoints/"
     reload_network_only = False

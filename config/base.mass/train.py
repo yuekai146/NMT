@@ -112,6 +112,7 @@ def MT_main():
             trainer.num_train = num_train
 
 
+        trainer.save_periodic()
         for i_batch, raw_batch in enumerate(data_iter):
             try:
                 trainer.mt_step(raw_batch)
@@ -235,10 +236,10 @@ def MASS_main():
             except RuntimeError:
                 continue
 
-        #scores = trainer.valid_step()
-        #trainer.save_best_model(scores)
+        scores = trainer.valid_step()
+        trainer.save_best_model(scores)
         trainer.save_periodic()
-        trainer.end_epoch(None)
+        trainer.end_epoch(scores)
         torch.distributed.barrier()
 
 

@@ -281,7 +281,7 @@ class ParallelDataset(Dataset):
 
     def get_batch_ids(self, shuffle, group_by_size=False, num_subsets=None):
         assert type(shuffle) is bool and type(group_by_size) is bool
-        assert group_by_size is False or shuffle is True
+        #assert group_by_size is False or shuffle is True
         assert num_subsets is None or isinstance(num_subsets, int)
 
         if num_subsets is not None:

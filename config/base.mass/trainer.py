@@ -423,11 +423,11 @@ class Enc_Dec_Trainer(Trainer):
             self.net.module.train()
         bsz = raw_batch.size(0)
         l = ( raw_batch != self.TOTAL_TEXT.vocab.stoi[config.PAD] ).sum(-1).view(bsz).long().numpy().tolist()
+        
+        # Get a batch of input data
         batch = self.restricted_mask_sent(raw_batch, l)
-
         batch_size = batch["src"].size(0)
         del raw_batch
-        # Get a batch of input data
         
         # Network forward step
         tensor = self.net(

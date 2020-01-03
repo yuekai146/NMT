@@ -353,7 +353,7 @@ def main():
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-ckpt', required=True)
-    parser.add_argument('-k', '--beam_size', type=int, default=4)
+    parser.add_argument('-k', '--beam_size', type=int, default=5)
     parser.add_argument('-lp', '--length_penalty', type=float, default=0.7)
     parser.add_argument('--early_stopping', action="store_true")
     parser.add_argument('-max_len', type=int, default=250)

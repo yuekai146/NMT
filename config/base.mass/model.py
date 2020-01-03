@@ -36,6 +36,9 @@ class Encoder_Decoder(nn.Module):
             self.tgt_emb[0].emb.weight = self.src_emb[0].emb.weight
             self.generator.proj.weight = self.src_emb[0].emb.weight
 
+        # Share position embeddings
+        self.tgt_emb[1].emb.weight = self.src_emb[1].emb.weight
+
     def forward(
             self, src, src_mask, tgt, tgt_mask,
             log_prob=True, src_pos=None, tgt_pos=None,

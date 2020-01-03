@@ -85,7 +85,7 @@ class Config:
     print_interval = 5
     # To early stop if validation performance did not
     # improve for decrease_counts_max epochs
-    decrease_counts_max = 15
+    decrease_counts_max = 2
     stopping_criterion = "ppl"
 
 config = Config()
