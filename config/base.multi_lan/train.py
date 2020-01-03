@@ -1,0 +1,392 @@
+from common import config, MODE
+from trainer import Enc_Dec_Trainer
+from utils import create_logger
+
+import argparse
+import os
+import pickle
+import random
+import torch
+from dataset import ParallelDataset, MultiLingualDataset, Dataset, Text, Batch, Vocab 
+
+
+def MT_main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--local_rank", type=int, default=-1,
+                        help="Multi-GPU - Local rank"
+            )
+    parser.add_argument("--raw_src", type=str, default=None,
+            help="Tokenized source train file"
+            )
+    parser.add_argument("--raw_tgt", type=str, default=None,
+            help="Tokenized target train file"
+            )
+    parser.add_argument("--continue_path", type=str, default=None,
+            help="Where to reload checkpoint"
+            )
+    parser.add_argument("--dump_path", type=str, default=None,
+            help="Where to store checkpoints"
+            )
+    parser.add_argument('--data_bin', default=None, type=str,
+            help="Path to store binarized data"
+            )
+    parser.add_argument('--epoch_size', default=None, type=int,
+            help="Maximum train epochs"
+            )
+    params = parser.parse_args()
+
+    if params.raw_src is not None:
+        config.SRC_RAW_TRAIN_PATH = params.raw_src
+    if params.raw_tgt is not None:
+        config.TGT_RAW_TRAIN_PATH = params.raw_tgt
+    if params.continue_path is not None:
+        config.continue_path = params.continue_path
+    if params.dump_path is not None:
+        config.dump_path = params.dump_path
+    if params.data_bin is not None:
+        config.data_bin = params.data_bin
+        config.train_iter_dump_path = config.data_bin + "train_iter"
+        config.valid_iter_dump_path = config.data_bin + "valid_iter"
+        config.src_vocab_dump_path = config.data_bin + "SRC"
+        config.tgt_vocab_dump_path = config.data_bin + "TGT"
+    if params.epoch_size is not None:
+        config.epoch_size = params.epoch_size
+
+    # Initialize distributed training
+    if params.local_rank != -1:
+        torch.cuda.set_device(params.local_rank)
+        torch.distributed.init_process_group(backend="nccl",  init_method='env://')
+    trainer = Enc_Dec_Trainer(params)
+
+    # Check whether dump_path exists, if not create one
+    if params.local_rank == 0 or config.multi_gpu == False:
+        if os.path.exists(config.dump_path) == False:
+            os.makedirs(config.dump_path)
+
+        # Save config in dump_path
+        f = open(os.path.join(config.dump_path, "config.pkl"), 'wb')
+        pickle.dump(config, f)
+        f.close()
+    torch.distributed.barrier()
+
+    # Create logger for each process
+    logger = create_logger(
+            os.path.join(config.dump_path, 'train.log'),
+            rank=getattr(params, 'local_rank', 0)
+            )
+    if params.eval_only:
+        trainer.valid_step()
+        exit()
+
+    # Start epoch training
+    for i_epoch in range(trainer.epoch_size):
+        if trainer.epoch > trainer.epoch_size:
+            break
+
+        if config.multi_gpu == False or int(os.environ["NGPUS"]) == 1:
+            # Single GPU, do not need to split dataset
+            data_iter = iter(trainer.iterators["train"].get_iterator(True, True))
+        else:
+            if params.local_rank == 0:
+                # Split dataset into NGPUS subsets, with the same number of batches
+                # Store NGPUS subsets in config.data_bin
+                subset_batches = trainer.iterators["train"].get_batch_ids(
+                        shuffle=True, group_by_size=True,
+                        num_subsets=int(os.environ["NGPUS"])
+                        )
+                
+                for i_sub in range(len(subset_batches)):
+                    f = open(os.path.join(config.data_bin, "batches_" + str(i_sub)), 'wb')
+                    pickle.dump(subset_batches[i_sub], f)
+                    f.close()
+
+            torch.distributed.barrier()
+            # Each process reads its own subset 
+            f = open(os.path.join(config.data_bin, "batches_" + str(params.local_rank)), 'rb')
+            subset_batches = pickle.load(f)
+            f.close()
+            n_batches = len(subset_batches)
+            print("Process {}, n_batches is {}".format(params.local_rank, n_batches))
+            data_iter = iter(trainer.iterators["train"].get_batches_iterator(subset_batches))
+            num_train = sum([len(b) for b in subset_batches])
+            trainer.num_train = num_train
+
+
+        for i_batch, raw_batch in enumerate(data_iter):
+            try:
+                trainer.mt_step(raw_batch)
+                trainer.iter()
+                torch.distributed.barrier()
+            except RuntimeError:
+                continue
+
+        scores = trainer.valid_step()
+        trainer.save_best_model(scores)
+        trainer.save_periodic()
+        trainer.end_epoch(scores)
+        torch.distributed.barrier()
+
+
+def MASS_main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--local_rank", type=int, default=-1,
+                        help="Multi-GPU - Local rank"
+            )
+    parser.add_argument("--continue_path", type=str, default=None,
+            help="Where to reload checkpoint"
+            )
+    parser.add_argument("--dump_path", type=str, default=None,
+            help="Where to store checkpoints"
+            )
+    parser.add_argument('--data_bin', default=None, type=str,
+            help="Path to store binarized data"
+            )
+    parser.add_argument('--epoch_size', default=None, type=int,
+            help="Maximum train epochs"
+            )
+    parser.add_argument('--eval_only', action="store_true",
+            help="Only perform evaluation"
+            )
+    params = parser.parse_args()
+
+    if params.continue_path is not None:
+        config.continue_path = params.continue_path
+    if params.dump_path is not None:
+        config.dump_path = params.dump_path
+    if params.data_bin is not None:
+        config.data_bin = params.data_bin
+        config.train_iter_dump_path = config.data_bin + "train_iter"
+        config.valid_iter_dump_path = config.data_bin + "valid_iter"
+        config.total_vocab_dump_path = config.data_bin + "TOTAL"
+    if params.epoch_size is not None:
+        config.epoch_size = params.epoch_size
+
+    # Initialize distributed training
+    if params.local_rank != -1:
+        torch.cuda.set_device(params.local_rank)
+        torch.distributed.init_process_group(backend="nccl",  init_method='env://')
+    trainer = Enc_Dec_Trainer(params)
+
+
+    # Check whether dump_path exists, if not create one
+    if params.local_rank == 0 or config.multi_gpu == False:
+        if os.path.exists(config.dump_path) == False:
+            os.makedirs(config.dump_path)
+
+        # Save config in dump_path
+        f = open(os.path.join(config.dump_path, "config.pkl"), 'wb')
+        pickle.dump(config, f)
+        f.close()
+    torch.distributed.barrier()
+
+    # Create logger for each process
+    logger = create_logger(
+            os.path.join(config.dump_path, 'train.log'),
+            rank=getattr(params, 'local_rank', 0)
+            )
+    
+    if params.eval_only:
+        trainer.valid_step()
+        exit()
+
+    # Start epoch training
+    for i_epoch in range(trainer.epoch_size):
+        if trainer.epoch > trainer.epoch_size:
+            break
+
+        if config.multi_gpu == False or int(os.environ["NGPUS"]) == 1:
+            # Single GPU, do not need to split dataset
+            subset_batches = trainer.iterators["train"].get_batch_ids(
+                    shuffle=True, group_by_size=True
+                    )
+            data_iter = iter(trainer.iterators["train"].get_batches_iterator(subset_batches))
+            trainer.num_train = sum([len(b) for b in subset_batches]) * len(config.LANS)
+        else:
+            if params.local_rank == 0:
+                # Split dataset into NGPUS subsets, with the same number of batches
+                # Store NGPUS subsets in config.data_bin
+                subset_batches = trainer.iterators["train"].get_batch_ids(
+                        shuffle=True, group_by_size=True,
+                        num_subsets=int(os.environ["NGPUS"])
+                        )
+
+                for i_sub in range(len(subset_batches)):
+                    f = open(os.path.join(config.data_bin, "batches_" + str(i_sub)), 'wb')
+                    pickle.dump(subset_batches[i_sub], f)
+                    f.close()
+
+            torch.distributed.barrier()
+            # Each process reads its own subset 
+            f = open(os.path.join(config.data_bin, "batches_" + str(params.local_rank)), 'rb')
+            subset_batches = pickle.load(f)
+            f.close()
+            trainer.num_train = sum([len(b) for b in subset_batches]) * len(config.LANS)
+
+            data_iter = iter(trainer.iterators["train"].get_batches_iterator(subset_batches))
+        
+        for i_batch, raw_batch in enumerate(data_iter):
+            try:
+                keys = list(raw_batch.keys())
+                random.shuffle(keys)
+                for k in keys:
+                    trainer.mass_step(raw_batch[k], k)
+                    trainer.iter()
+                    torch.distributed.barrier()
+            except RuntimeError:
+                continue
+
+        scores = trainer.valid_step()
+        trainer.save_best_model(scores)
+        trainer.save_periodic()
+        trainer.end_epoch(scores)
+        torch.distributed.barrier()
+
+
+def reset_train_iter(trainer, params, direction):
+    if config.multi_gpu == False or int(os.environ["NGPUS"]) == 1:
+        # Single GPU, do not need to split dataset
+        train_iter = trainer.iterators["train"][direction]
+        subset_batches = train_iter.get_batch_ids(
+                shuffle=True, group_by_size=True
+                )
+        return iter(train_iter.get_batches_iterator(subset_batches))
+    else:
+        if params.local_rank == 0:
+            # Split dataset into NGPUS subsets, with the same number of batches
+            # Store NGPUS subsets in config.data_bin
+            train_iter = trainer.iterators["train"][direction]
+            subset_batches = train_iter.get_batch_ids(
+                    shuffle=True, group_by_size=True,
+                    num_subsets=int(os.environ["NGPUS"])
+                    )
+
+            for i_sub in range(len(subset_batches)):
+                subset_batches_path = os.path.join(config.data_bin, direction)
+                if os.path.exists(subset_batches_path) is False:
+                    os.makedirs(subset_batches_path)
+                f = open(os.path.join(subset_batches_path, "batches_" + str(i_sub)), 'wb')
+                pickle.dump(subset_batches[i_sub], f)
+                f.close()
+
+        torch.distributed.barrier()
+        # Each process reads its own subset 
+        train_iter = trainer.iterators["train"][direction]
+        f = open(os.path.join(config.data_bin, direction + "/batches_" + str(params.local_rank)), 'rb')
+        subset_batches = pickle.load(f)
+        f.close()
+
+        return iter(train_iter.get_batches_iterator(subset_batches))
+    
+    return data_iter
+
+
+def Multi_MT_main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--local_rank", type=int, default=-1,
+                        help="Multi-GPU - Local rank"
+            )
+    parser.add_argument("--continue_path", type=str, default=None,
+            help="Where to reload checkpoint"
+            )
+    parser.add_argument("--dump_path", type=str, default=None,
+            help="Where to store checkpoints"
+            )
+    parser.add_argument('--data_bin', default=None, type=str,
+            help="Path to store binarized data"
+            )
+    parser.add_argument('--epoch_size', default=None, type=int,
+            help="Maximum train epochs"
+            )
+    parser.add_argument('--eval_only', action="store_true",
+            help="Only perform evaluation"
+            )
+    params = parser.parse_args()
+
+    if params.continue_path is not None:
+        config.continue_path = params.continue_path
+    if params.dump_path is not None:
+        config.dump_path = params.dump_path
+    if params.data_bin is not None:
+        config.data_bin = params.data_bin
+        config.train_iter_dump_path = config.data_bin + "train_iter"
+        config.valid_iter_dump_path = config.data_bin + "valid_iter"
+        config.total_vocab_dump_path = config.data_bin + "TOTAL"
+    if params.epoch_size is not None:
+        config.epoch_size = params.epoch_size
+
+    # Initialize distributed training
+    if params.local_rank != -1:
+        torch.cuda.set_device(params.local_rank)
+        torch.distributed.init_process_group(backend="nccl",  init_method='env://')
+    trainer = Enc_Dec_Trainer(params)
+
+
+    # Check whether dump_path exists, if not create one
+    if params.local_rank == 0 or config.multi_gpu == False:
+        if os.path.exists(config.dump_path) == False:
+            os.makedirs(config.dump_path)
+
+        # Save config in dump_path
+        f = open(os.path.join(config.dump_path, "config.pkl"), 'wb')
+        pickle.dump(config, f)
+        f.close()
+    torch.distributed.barrier()
+
+    # Create logger for each process
+    logger = create_logger(
+            os.path.join(config.dump_path, 'train.log'),
+            rank=getattr(params, 'local_rank', 0)
+            )
+    
+    if params.eval_only:
+        trainer.valid_step()
+        exit()
+    
+    def check_epoch_end(flags):
+        for k, v in flags.items():
+            if v is False:
+                return False
+        return True
+
+    # Start epoch training
+    for i_epoch in range(trainer.epoch_size):
+        if trainer.epoch > trainer.epoch_size:
+            break
+
+        should_end_epoch = {}
+        for direction in trainer.iterators["train"].keys():
+            should_end_epoch[direction] = False
+
+        data_iter = {}
+        for direction in trainer.iterators["train"].keys():
+            data_iter[direction] = reset_train_iter(trainer, params, direction)
+        
+        while check_epoch_end(should_end_epoch) is False:
+            for direction, para_train_iter in data_iter.items():
+                try:
+                    src_lan, tgt_lan = direction.split('-')
+                    raw_batch = next(para_train_iter)
+                    trainer.multi_mt_step(raw_batch, src_lan, tgt_lan)
+                    trainer.iter()
+                except StopIteration:
+                    data_iter[direction] = reset_train_iter(trainer, params, direction)
+                    should_end_epoch[direction] = True
+
+        scores = trainer.valid_step()
+        trainer.save_best_model(scores)
+        trainer.save_periodic()
+        trainer.end_epoch(scores)
+        torch.distributed.barrier()
+
+
+def main():
+    if MODE == 'MT':
+        MT_main()
+    elif MODE == 'MASS':
+        MASS_main()
+    elif MODE == 'Multi_MT':
+        Multi_MT_main()
+
+
+if __name__ == "__main__":
+    main()
