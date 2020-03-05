@@ -171,7 +171,7 @@ function Active_Learn () {
 		-bt \
 		-onq $onq \
 		-OT $OT \
-		-bttb $((i*TOK_BUDGET + 9 * TOK_BUDGET))
+		-bttb $((i*TOK_BUDGET + 3 * TOK_BUDGET))
 	cd active_data/$SRC-$TGT
 	rm test_active.$SRC-$TGT.out*
 	rm -rf *_${i}_?
@@ -182,7 +182,7 @@ function Active_Learn () {
 function BT () {
 	# Initialize labeled and unlabeled dataset
 	local ACTIVE_FUNC=${1:-random}
-	local TOK_BUDGET=${2:-590000}
+	local TOK_BUDGET=${2:-1000000}
 	local N_ROUNDS=${3:-11}
 	local START_ROUND=${4:-1}
 	local LAN1=${5:-en}
@@ -223,12 +223,10 @@ function BT () {
 
 
 function main () {
-	for ACTIVE_FUNC in dden; do
-		BT $ACTIVE_FUNC 590000 11 2 
-		mkdir -p result/$ACTIVE_FUNC
-		mv active_data checkpoints result/$ACTIVE_FUNC/
-		rm -rf data_bin
-	done
+	BT dden
+	mkdir -p result/$ACTIVE_FUNC
+	mv active_data checkpoints result/$ACTIVE_FUNC/
+	rm -rf data_bin
 }
 
 

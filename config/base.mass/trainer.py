@@ -602,57 +602,6 @@ class Enc_Dec_Trainer(Trainer):
         
         return batch 
 
-    '''
-    def mass_step(self, raw_batch, lan, empty_cache=False):
-        """
-        MASS pretrain step.
-        raw_batch: torch.LongTensor (bsz, slen)
-        lan: str, must be in config.LANS
-        """
-        self.net.train()
-        self.criterion.train()
-        if config.multi_gpu:
-            self.net.module.train()
-        # Get a batch of input data
-        mask = ( raw_batch != self.TOTAL_TEXT.vocab.stoi[config.PAD] )
-        bsz = mask.size(0)
-        batch = self.restricted_mask_sent(
-                raw_batch, mask.sum(-1).view(bsz).long().cpu().numpy().tolist(), config.span_len
-                )
-        bsz = raw_batch.size(0)
-        
-        del raw_batch
-        
-        # Network forward step
-        tensor = self.net(
-                batch['src'], batch['src_mask'], batch['tgt'],
-                batch['tgt_mask'], #tgt_pos=batch["tgt_pos"],
-                src_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>'],
-                tgt_lang=self.TOTAL_TEXT.vocab.stoi['<' + lan.upper() + '>']
-                )
-
-        # loss
-        loss, nll_loss = self.criterion(tensor, batch['target'], batch['target_mask'])
-        self.stats[('MASS-%s-loss' % (lan))].append(loss.item())
-        self.stats[('MASS-%s-ppl' % (lan))].append(nll_loss.exp().item())
-        # optimize
-        self.optimize(loss)
-
-        # number of processed sentences / words
-        n_tokens = batch["n_tokens"]
-        self.n_sentences += bsz
-        self.stats['processed_s'] += bsz
-        self.stats['processed_w'] += n_tokens
-        
-        del batch
-        del loss
-        del nll_loss
-        del tensor
-        
-        if empty_cache:
-            torch.cuda.empty_cache()
-    '''
-
 
     def valid_step(self):
         """
