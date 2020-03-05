@@ -286,6 +286,14 @@ def load_model(checkpoint_path, net):
     s_dict = {}
     for k in ckpt["net"]:
         new_k = k[7:]
+        if 'linears.0' in new_k:
+            new_k = new_k.replace('linears.0', 'q_lin')
+        elif 'linears.1' in new_k:
+            new_k = new_k.replace('linears.1', 'k_lin')
+        elif 'linears.2' in new_k:
+            new_k = new_k.replace('linears.2', 'v_lin')
+        elif 'linears.3' in new_k:
+            new_k = new_k.replace('linears.3', 'out_lin')
         s_dict[new_k] = ckpt["net"][k]
 
     net.load_state_dict(s_dict)

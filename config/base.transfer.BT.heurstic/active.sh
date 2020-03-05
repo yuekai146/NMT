@@ -116,7 +116,7 @@ function Active_Learn () {
 	python3 modify.py get \
 		-AO active_data/$SRC-$TGT/text_active.$SRC-$TGT.out_${i} \
 		-tb $TOK_BUDGET \
-		-bttb $((i*TOK_BUDGET + 9 * TOK_BUDGET)) \
+		-bttb $((i*TOK_BUDGET + 3 * TOK_BUDGET)) \
 		-o active_data/$SRC-$TGT/active_tmp \
 		-on $NGPUS
 	
@@ -144,7 +144,7 @@ function Active_Learn () {
 	done
 	cat active_tmp_others >> test_active.$SRC-$TGT.out_$i
 	rm active_tmp*
-	rm text_active.$src-$TGT.out_$i
+	rm text_active.$SRC-$TGT.out_$i
 	cd -
 
 	# Modify all data
@@ -223,7 +223,7 @@ function BT () {
 
 
 function main () {
-	BT dden
+	BT dden 
 	mkdir -p result/$ACTIVE_FUNC
 	mv active_data checkpoints result/$ACTIVE_FUNC/
 	rm -rf data_bin

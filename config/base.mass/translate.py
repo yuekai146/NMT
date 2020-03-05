@@ -8,7 +8,7 @@ import os
 import re
 
 import model
-from common import config
+from common import config, MODE
 from utils import remove_bpe, remove_special_tok, subsequent_mask
 from dataset import ParallelDataset
 
@@ -16,11 +16,14 @@ from dataset import ParallelDataset
 def greedy(args, net, src, src_mask, src_vocab, tgt_vocab):
     # src: torch.LongTensor (bsz, slen)
     # src_mask: torch.ByteTensor (bsz, 1, slen)
-    max_len = args.max_len
+    slen = src.size(1)
+    max_len = min(args.max_len, int(args.gen_a * slen + args.gen_b))
+    src_lan = src_vocab.stoi["<" + args.src_lan.upper() + ">"]
+    tgt_lan = tgt_vocab.stoi["<" + args.tgt_lan.upper() + ">"]
     with torch.no_grad():
         net.eval()
         bsz = src.size(0)
-        enc_out = net.encode(src=src, src_mask=src_mask)
+        enc_out = net.encode(src=src, src_mask=src_mask, src_lang=src_lan)
         generated = src.new(bsz, max_len)
         generated.fill_(tgt_vocab.stoi[config.PAD])
         generated[:, 0].fill_(tgt_vocab.stoi[config.BOS])
@@ -41,7 +44,9 @@ def greedy(args, net, src, src_mask, src_vocab, tgt_vocab):
 
             logit = net.decode(
                     enc_out, src_mask, x,
-                    tgt_mask[:, cur_len-1, :].unsqueeze(-2), cache
+                    tgt_mask[:, cur_len-1, :].unsqueeze(-2),
+                    cache=cache, tgt_lang=tgt_lan,
+                    decoder_lang_id=config.LANG2IDS[args.tgt_lan.upper()]
                     )
             scores = net.generator(logit).exp().squeeze()
             
@@ -123,10 +128,15 @@ def generate_beam(args, net, src, src_mask, src_vocab, tgt_vocab):
         - LongTensor(bs) [5, 6]
     """
 
-    max_len = args.max_len
+    slen = src.size(1)
+    max_len = min(args.max_len, int(args.gen_a * slen + args.gen_b))
     beam_size = args.beam_size
     length_penalty = args.length_penalty
     early_stopping = args.early_stopping
+    src_lan = src_vocab.stoi["<" + args.src_lan.upper() + ">"]
+    tgt_lan = tgt_vocab.stoi["<" + args.tgt_lan.upper() + ">"]
+
+    print(src_lan, tgt_lan)
 
     with torch.no_grad():
         net.eval()
@@ -135,7 +145,7 @@ def generate_beam(args, net, src, src_mask, src_vocab, tgt_vocab):
         bs = src.size(0)
         
         # calculate encoder output
-        src_enc = net.encode(src=src, src_mask=src_mask)
+        src_enc = net.encode(src=src, src_mask=src_mask, src_lang=src_lan)
         src_len = src_mask.view(bs, -1).sum(dim=-1).long()
  
         # check inputs
@@ -181,7 +191,9 @@ def generate_beam(args, net, src, src_mask, src_vocab, tgt_vocab):
 
             tensor = net.decode(
                     src_enc, src_mask, x,
-                    tgt_mask[:, cur_len-1, :].unsqueeze(-2), cache
+                    tgt_mask[:, cur_len-1, :].unsqueeze(-2),
+                    cache=cache, tgt_lang=tgt_lan,
+                    decoder_lang_id=config.LANG2IDS[args.tgt_lan.upper()]
                     )
             
             assert tensor.size() == (bs * beam_size, 1, config.d_model)
@@ -289,9 +301,14 @@ def load_model(checkpoint_path, net):
         s_dict[new_k] = ckpt["net"][k]
 
     net.load_state_dict(s_dict)
+    
+    if MODE == "MT":
+        src_vocab = ckpt["src_vocab"]
+        tgt_vocab = ckpt["tgt_vocab"]
+    elif MODE == "MASS":
+        src_vocab = ckpt["total_vocab"]
+        tgt_vocab = ckpt["total_vocab"]
 
-    src_vocab = ckpt["src_vocab"]
-    tgt_vocab = ckpt["tgt_vocab"]
     return net, src_vocab, tgt_vocab
 
 
@@ -328,7 +345,7 @@ def translate(args, net, src_vocab, tgt_vocab):
     if args.tokens_per_batch is not None:
         infer_dataset.tokens_per_batch = args.tokens_per_batch
 
-    infer_dataiter = iter(infer_dataset.get_iterator(True, True))
+    infer_dataiter = iter(infer_dataset.get_iterator(False, True))
 
     for raw_batch in infer_dataiter:
         src_mask = (raw_batch.src != src_vocab.stoi[config.PAD]).unsqueeze(-2)
@@ -363,6 +380,10 @@ def main():
     parser.add_argument('--max_batch_size', type=int, default=None)
     parser.add_argument('--tokens_per_batch', type=int, default=None)
     parser.add_argument('--greedy', action='store_true')
+    parser.add_argument('--src_lan', type=str, default="en")
+    parser.add_argument('--tgt_lan', type=str, default="de")
+    parser.add_argument('--gen_a', type=float, default=1.3)
+    parser.add_argument('--gen_b', type=int, default=5)
 
     args = parser.parse_args()
     args.use_cuda = ( args.no_cuda == False ) and torch.cuda.is_available()

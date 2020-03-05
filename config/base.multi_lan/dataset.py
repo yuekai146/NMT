@@ -524,6 +524,44 @@ def get(params=None):
                     TOTAL.vocab
                     )
         return train_iter, valid_iter, TOTAL
+    
+    elif MODE == "Multi_MT":
+        if params is not None:
+            DATA_PATH = config.DATA_PATH if params.DATA_PATH is None else params.DATA_PATH
+            config.PARA_RAW_TRAIN_PATH = []
+            for direction in config.valid_directions:
+                src, tgt = direction.split('-')
+                raw_src_train_path = DATA_PATH + '/train.' + direction + '.' + src
+                raw_tgt_train_path = DATA_PATH + '/train.' + direction + '.' + tgt
+                config.PARA_RAW_TRAIN_PATH.append([raw_src_train_path, raw_tgt_train_path])
+            
+            config.TOTAL_VOCAB_PATH = DATA_PATH + "/vocab.total"
+        TOTAL = Text(Vocab(config.TOTAL_VOCAB_PATH), False, False)
+        sents = {}
+        for direction, raw_train_paths in zip(config.valid_directions, config.PARA_RAW_TRAIN_PATH):
+            raw_src_train_path, raw_tgt_train_path = raw_train_paths
+            sents[direction] = [read_sents(raw_src_train_path), read_sents(raw_tgt_train_path)]
+            print("Read {} parallel corpus from {} and {}".format(direction, raw_src_train_path, raw_tgt_train_path))
+
+        train_iter = {}
+        for direction in config.valid_directions:
+            train_iter[direction] = ParallelDataset(
+                    sents[direction][0],
+                    sents[direction][1],
+                    TOTAL.vocab,
+                    TOTAL.vocab
+                    )
+
+        valid_iter = {}
+        for direction in config.valid_directions:
+            valid_src_path, valid_tgt_path = config.RAW_VALID_PATH[direction]
+            valid_iter[direction] = ParallelDataset(
+                    read_sents(valid_src_path),
+                    read_sents(valid_tgt_path),
+                    TOTAL.vocab,
+                    TOTAL.vocab
+                    )
+        return train_iter, valid_iter, TOTAL
 
 
 def load():
@@ -549,7 +587,7 @@ def load():
 
         return train_iter, valid_iter, SRC_TEXT, TGT_TEXT
     
-    elif MODE == "MASS":
+    elif MODE == "MASS" or MODE == "Multi_MT":
         train_iter = load_pkl(config.train_iter_dump_path)
         valid_iter = load_pkl(config.valid_iter_dump_path)
         TOTAL_TEXT = load_pkl(config.total_vocab_dump_path)
@@ -572,7 +610,17 @@ if __name__ == "__main__":
         parser.add_argument('--data_bin', default=None, type=str, help="Path to store binarized data")
         args = parser.parse_args()
         train_iter, valid_iter, SRC_TEXT, TGT_TEXT = get(args)
+    
     elif MODE == "MASS":
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--store', action="store_true", help="Store preprocessed dataset and vocab")
+        parser.add_argument('--test', action='store_true', help="Test dataset code")
+        parser.add_argument('--DATA_PATH', default=None, type=str, help="Path of original corpus")
+        parser.add_argument('--data_bin', default=None, type=str, help="Path to store binarized data")
+        args = parser.parse_args()
+        train_iter, valid_iter, TOTAL_TEXT = get(args)
+    
+    elif MODE == "Multi_MT":
         parser = argparse.ArgumentParser()
         parser.add_argument('--store', action="store_true", help="Store preprocessed dataset and vocab")
         parser.add_argument('--test', action='store_true', help="Test dataset code")
@@ -608,7 +656,15 @@ if __name__ == "__main__":
 
                 if i_batch >= 0:
                     break
-        test_iterator(train_iter.get_iterator(True, True))
+        
+        if MODE == "Multi_MT": 
+            SRC_TEXT = TOTAL_TEXT
+            TGT_TEXT = TOTAL_TEXT
+            test_iterator(train_iter['de-en'].get_iterator(True, True))
+            test_iterator(train_iter['fr-en'].get_iterator(True, True))
+        
+        elif MODE == "MT":
+            test_iterator(train_iter.get_iterator(True, True))
 
     if args.store: 
         if MODE == "MT":
@@ -649,6 +705,37 @@ if __name__ == "__main__":
             f.close()
         
         elif MODE == "MASS":
+
+            if args.data_bin is None:
+                args.data_bin = config.data_bin
+            if os.path.exists(args.data_bin) == False:
+                os.makedirs(args.data_bin)
+            
+            if args.data_bin != config.data_bin:
+                train_iter_dump_path = args.data_bin + 'train_iter'
+                valid_iter_dump_path = args.data_bin + 'valid_iter'
+                total_vocab_dump_path = args.data_bin + 'TOTAL'
+            else:
+                train_iter_dump_path = config.data_bin + 'train_iter'
+                valid_iter_dump_path = config.data_bin + 'valid_iter'
+                total_vocab_dump_path = config.data_bin + 'TOTAL'
+
+            # Dump train dataset
+            f = open(os.path.join(train_iter_dump_path), 'wb')
+            pickle.dump(train_iter, f)
+            f.close()
+            
+            # Dump valid dataset
+            f = open(os.path.join(valid_iter_dump_path), 'wb')
+            pickle.dump(valid_iter, f)
+            f.close()
+            
+            # Dump total vocab
+            f = open(os.path.join(total_vocab_dump_path), 'wb')
+            pickle.dump(TOTAL_TEXT, f)
+            f.close()
+        
+        elif MODE == "Multi_MT":
 
             if args.data_bin is None:
                 args.data_bin = config.data_bin

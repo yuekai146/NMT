@@ -66,6 +66,14 @@ class Trainer(object):
             self.iterators["valid"] = valid_iter
             self.num_train = len(train_iter)
             self.TOTAL_TEXT = TOTAL_TEXT
+        elif MODE == "Multi_MT":
+            train_iter, valid_iter, TOTAL_TEXT = dataset.load()
+            torch.distributed.barrier()
+            print("Process {}, dataset loaded.".format(params.local_rank))
+            self.iterators["train"] = train_iter
+            self.iterators["valid"] = valid_iter
+            self.num_train = max([len(para_train_iter) for k, para_train_iter in train_iter.items()]) * len(train_iter)
+            self.TOTAL_TEXT = TOTAL_TEXT
 
         torch.distributed.barrier()
 
@@ -128,6 +136,12 @@ class Trainer(object):
                 [('processed_s', 0), ('processed_w', 0)] +
                 [('MASS-%s-loss' % (lan.lower()), []) for lan in config.LANS] +
                 [('MASS-%s-ppl' % (lan.lower()), []) for lan in config.LANS]
+            )
+        elif MODE == "Multi_MT":
+            self.stats = OrderedDict(
+                [('processed_s', 0), ('processed_w', 0)] +
+                [('MT-%s-loss' % (direction), []) for direction in config.valid_directions] +
+                [('MT-%s-ppl' % (direction), []) for direction in config.valid_directions]
             )
         self.last_time = time.time()
 
@@ -412,6 +426,50 @@ class Enc_Dec_Trainer(Trainer):
         del tensor
 	
     
+    def multi_mt_step(self, raw_batch, src_lan, tgt_lan):
+        """
+        Machine translation training step.
+        Can also be used for denoising auto-encoding.
+        """
+        self.net.train()
+        self.criterion.train()
+        if config.multi_gpu:
+            self.net.module.train()
+        
+        # Get a batch of input data
+        batch = get_batch(
+                raw_batch.src, raw_batch.tgt,
+                self.TOTAL_TEXT.vocab, self.TOTAL_TEXT.vocab
+                )
+        batch_size = batch["src"].size(0)
+        del raw_batch
+        
+        # Network forward step
+        tensor = self.net(
+                batch['src'], batch['src_mask'], batch['tgt'], batch['tgt_mask'],
+                src_lang=self.TOTAL_TEXT.vocab.stoi['<' + src_lan.upper() + '>'],
+                tgt_lang=self.TOTAL_TEXT.vocab.stoi['<' + tgt_lan.upper() + '>']
+                )
+
+        # loss
+        loss, nll_loss = self.criterion(tensor, batch['target'], batch['target_mask'])
+        self.stats[('MT-%s-%s-loss' % (src_lan, tgt_lan))].append(loss.item())
+        self.stats[('MT-%s-%s-ppl' % (src_lan, tgt_lan))].append(nll_loss.exp().item())
+        # optimize
+        self.optimize(loss)
+
+        # number of processed sentences / words
+        n_tokens = batch["n_tokens"]
+        self.n_sentences += batch_size
+        self.stats['processed_s'] += batch_size
+        self.stats['processed_w'] += n_tokens
+        
+        del batch
+        del loss
+        del nll_loss
+        del tensor
+
+
     def mass_step(self, raw_batch, lan):
         """
         Machine translation training step.
@@ -680,7 +738,7 @@ class Enc_Dec_Trainer(Trainer):
             
             return scores
         
-        elif MODE == "MASS":
+        elif MODE == "MASS" or MODE == "Multi_MT":
 
             n_words = 0
             xe_loss = 0
@@ -708,6 +766,10 @@ class Enc_Dec_Trainer(Trainer):
                                 )
 
                         # Network forward step
+                        if MODE == "MASS":
+                            decoder_lang_id = config.LANG2IDS[tgt_lan.upper()]
+                        elif MODE == "Multi_MT":
+                            decoder_lang_id = None
                         logits = net(
                                 src=batch["src"],
                                 src_mask=batch["src_mask"],
@@ -715,7 +777,7 @@ class Enc_Dec_Trainer(Trainer):
                                 tgt_mask=batch["tgt_mask"],
                                 src_lang=self.TOTAL_TEXT.vocab.stoi["<" + src_lan.upper() + ">"],
                                 tgt_lang=self.TOTAL_TEXT.vocab.stoi["<" + tgt_lan.upper() + ">"],
-                                decoder_lang_id=config.LANG2IDS[tgt_lan.upper()]
+                                decoder_lang_id=decoder_lang_id
                                 )
 
                         # loss
@@ -770,35 +832,29 @@ if __name__ == "__main__":
         torch.cuda.set_device(params.local_rank)
         torch.distributed.init_process_group(backend="nccl",  init_method='env://')
     trainer = Enc_Dec_Trainer(params)
-
-    data_iter = iter(
-            trainer.iterators["train"].get_iterator(
-                shuffle=True, group_by_size=True,
-                )
-            )
     
-    vocab = trainer.TOTAL_TEXT.vocab 
-    '''
-    raw_batch = next(data_iter)
-    mask = ( raw_batch['en'] != vocab.stoi[config.PAD] )
-    bsz = mask.size(0)
-    batch = trainer.restricted_mask_sent(
-            raw_batch['en'], mask.sum(-1).view(bsz).long().cpu().numpy().tolist(), config.span_len
-            )
-    idx = np.random.randint(bsz, size=(1))[0]
-    src = batch['src'][idx].cpu().numpy().tolist()
-    tgt = batch['tgt'][idx].cpu().numpy().tolist()
-    target = batch['target'][idx].cpu().numpy().tolist()
-    tgt_pos = batch['tgt_pos'][idx].cpu().numpy().tolist()
-    assert len(target) == len(tgt)
-    assert len(tgt) == len(tgt_pos)
+    for direction, train_iter in trainer.iterators["train"].items():
+        train_iter = iter(
+                train_iter.get_iterator(
+                    shuffle=True, group_by_size=True,
+                    )
+                )
+        
+        vocab = trainer.TOTAL_TEXT.vocab  
+        raw_batch = next(train_iter)
+        batch = get_batch(raw_batch.src, raw_batch.tgt, vocab, vocab)
+        bsz = batch['src'].size(0)
+        idx = np.random.randint(bsz, size=(1))[0]
+        src = batch['src'][idx].cpu().numpy().tolist()
+        tgt = batch['tgt'][idx].cpu().numpy().tolist()
+        target = batch['target'][idx].cpu().numpy().tolist()
+        assert len(target) == len(tgt)
 
-    print("SRC:", ' '.join([vocab.itos[idx] for idx in src]).replace("<pad>", ""))
-    print("TGT:", ' '.join([vocab.itos[idx] for idx in tgt]).replace("<pad>", ""))
-    print("TARGET:", ' '.join([vocab.itos[idx] for idx in target]).replace("<pad>", ""))
-    print(tgt_pos)
+        print("SRC:", ' '.join([vocab.itos[idx] for idx in src]).replace("<pad>", ""))
+        print("TGT:", ' '.join([vocab.itos[idx] for idx in tgt]).replace("<pad>", ""))
+        print("TARGET:", ' '.join([vocab.itos[idx] for idx in target]).replace("<pad>", ""))
+    
     '''
-
     for direction, valid_iter in trainer.iterators["valid"].items():
         src_lan, tgt_lan = direction.split('-')
         valid_iter.tokens_per_batch = -1
@@ -820,3 +876,4 @@ if __name__ == "__main__":
             print("{}:".format(src_lan), ' '.join([vocab.itos[idx] for idx in src]).replace("<pad>", ""))
             print("{}:".format(tgt_lan), ' '.join([vocab.itos[idx] for idx in tgt]).replace("<pad>", ""))
             break
+    '''
