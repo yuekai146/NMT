@@ -1,5 +1,6 @@
 from common import config
 from dataset import Dataset
+from translate import load_model
 import argparse
 import model
 import numpy as np
@@ -10,26 +11,6 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from utils import subsequent_mask, remove_bpe, remove_special_tok
 import math
-
-
-def load_model(checkpoint_path, net):
-    """
-    Reload a checkpoint if we find one.
-    """
-    assert os.path.isfile(checkpoint_path)
-    ckpt = torch.load(checkpoint_path, map_location='cpu')
-
-    # reload model parameters
-    s_dict = {}
-    for k in ckpt["net"]:
-        new_k = k[7:]
-        s_dict[new_k] = ckpt["net"][k]
-
-    net.load_state_dict(s_dict)
-
-    src_vocab = ckpt["src_vocab"]
-    tgt_vocab = ckpt["tgt_vocab"]
-    return net, src_vocab, tgt_vocab
 
 
 def gen_batch2str(generated, gen_len, tgt_vocab):
@@ -179,10 +160,9 @@ def query_instances(args, unlabeled_dataset, oracle, active_func="random", label
     # Preparations before querying instances
     # Reloading network parameters
     args.use_cuda = ( args.no_cuda == False ) and torch.cuda.is_available()
-    net, _ = model.get()
 
     assert os.path.exists(args.checkpoint)
-    net, src_vocab, tgt_vocab = load_model(args.checkpoint, net)
+    net, src_vocab, tgt_vocab = load_model(args.checkpoint)
 
     if args.use_cuda:
         net = net.cuda()

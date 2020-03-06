@@ -26,9 +26,6 @@ def main():
     parser.add_argument("--dump_path", type=str, default=None,
             help="Where to store checkpoints"
             )
-    parser.add_argument("--decrease_counts_max", type=int, default=None,
-            help="Maximum decrease number for early stopping"
-            )
     params = parser.parse_args()
 
     if params.raw_src is not None:
@@ -39,8 +36,6 @@ def main():
         config.continue_path = params.continue_path
     if params.dump_path is not None:
         config.dump_path = params.dump_path
-    if params.decrease_counts_max is not None:
-        config.decrease_counts_max = params.decrease_counts_max
 
     # Initialize distributed training
     if params.local_rank != -1:
@@ -92,8 +87,6 @@ def main():
             f = open(os.path.join(config.data_bin, "batches_" + str(params.local_rank)), 'rb')
             subset_batches = pickle.load(f)
             f.close()
-            n_batches = len(subset_batches)
-            print("Process {}, n_batches is {}".format(params.local_rank, n_batches))
             data_iter = iter(trainer.iterators["train"].get_batches_iterator(subset_batches))
             num_train = sum([len(b) for b in subset_batches])
             trainer.num_train = num_train
@@ -101,13 +94,11 @@ def main():
 
         for i_batch, raw_batch in enumerate(data_iter):
             try:
-                if i_batch == n_batches - 1:
-                    print(raw_batch.src.size())
                 trainer.train_step(raw_batch)
                 trainer.iter()
             except RuntimeError:
                 continue
-
+        
         scores = trainer.valid_step()
         trainer.save_best_model(scores)
         trainer.save_periodic()

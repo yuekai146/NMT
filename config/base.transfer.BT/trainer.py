@@ -40,6 +40,11 @@ class Trainer(object):
         assert config.epoch_size >= 1
         self.epoch_size = config.epoch_size
 
+        # network and criterion
+        net, criterion = model.get()
+        self.net = net
+        self.criterion = criterion
+
         # data iterators
         self.iterators = {}
         train_iter, valid_iter, SRC_TEXT, TGT_TEXT = dataset.load()
@@ -50,13 +55,6 @@ class Trainer(object):
         self.num_train = len(train_iter)
         self.SRC_TEXT = SRC_TEXT
         self.TGT_TEXT = TGT_TEXT
-        config.src_n_vocab = len(SRC_TEXT.vocab.itos)
-        config.tgt_n_vocab = len(TGT_TEXT.vocab.itos)
-
-        # network and criterion
-        net, criterion = model.get()
-        self.net = net
-        self.criterion = criterion
 
         torch.distributed.barrier()
 
@@ -255,16 +253,16 @@ class Trainer(object):
 
             if network_only == False:
                 # reload optimizers
+                self.opt.optimizer.load_state_dict(ckpt["opt"]["optimizer_state_dict"])
                 for k in ckpt["opt"].keys():
                     if k != "optimizer_state_dict":
                         setattr(self.opt, k, ckpt["opt"][k])
 
                 # reload main metrics
-                if config.optimizer_only == False:
-                    self.epoch = ckpt['epoch'] + 1
-                    self.n_total_iter = ckpt['n_total_iter']
-                    self.best_metrics = ckpt['best_metrics']
-                    self.early_stopping_metrics = ckpt['early_stopping_metrics']
+                self.epoch = ckpt['epoch'] + 1
+                self.n_total_iter = ckpt['n_total_iter']
+                self.best_metrics = ckpt['best_metrics']
+                self.early_stopping_metrics = ckpt['early_stopping_metrics']
             
             logger.warning(f"Checkpoint reloaded. Resuming at epoch {self.epoch} / iteration {self.n_total_iter} ...")
 
@@ -328,23 +326,23 @@ class Trainer(object):
 
 
     def end_epoch(self, scores=None):
-        if scores is not None:
-            self.early_stop(scores) 
-            print("Process {}, should terminate: {}".format(self.params.local_rank, self.should_terminate.item()))
-            
-            if config.multi_gpu:
-                if self.should_terminate.item() == True:
-                    exit()
-            else:
-                if self.should_terminate == True:
-                    exit()
+       
+        self.early_stop(scores) 
+        print("Process {}, should terminate: {}".format(self.params.local_rank, self.should_terminate.item()))
+        
+        if config.multi_gpu:
+            if self.should_terminate.item() == True:
+                exit()
+        else:
+            if self.should_terminate == True:
+                exit()
 
         self.epoch += 1
         self.n_sentences = 0
 
 
 class Enc_Dec_Trainer(Trainer):
-    '''
+
     def train_step(self, raw_batch):
         """
         Machine translation training step.
@@ -379,6 +377,7 @@ class Enc_Dec_Trainer(Trainer):
         loss, nll_loss = self.criterion(**loss_inputs) 
         self.stats[('MT-%s-%s-loss' % (config.SRC_LAN, config.TGT_LAN))].append(loss.item())
         self.stats[('MT-%s-%s-ppl' % (config.SRC_LAN, config.TGT_LAN))].append(nll_loss.exp().item())
+
         # optimize
         self.optimize(loss)
 
@@ -388,71 +387,27 @@ class Enc_Dec_Trainer(Trainer):
         self.n_sentences += batch_size
         self.stats['processed_s'] += batch_size
         self.stats['processed_w'] += n_tokens
-    '''
-        
-    
-    def train_step(self, raw_batch):
-        """
-        Machine translation training step.
-        Can also be used for denoising auto-encoding.
-        """
-        self.net.train()
-        self.criterion.train()
-        if config.multi_gpu:
-            self.net.module.train()
-        batch = get_batch(
-                raw_batch.src, raw_batch.tgt,
-                self.SRC_TEXT.vocab, self.TGT_TEXT.vocab
-                )
-        batch_size = batch["src"].size(0)
-        del raw_batch
-        # Get a batch of input data
 
-        # Network forward step
-        tensor = self.net(batch['src'], batch['src_mask'], batch['tgt'], batch['tgt_mask'])
 
-        # loss
-        loss, nll_loss = self.criterion(tensor, batch['target'], batch['target_mask'])
-        self.stats[('MT-%s-%s-loss' % (config.SRC_LAN, config.TGT_LAN))].append(loss.item())
-        self.stats[('MT-%s-%s-ppl' % (config.SRC_LAN, config.TGT_LAN))].append(nll_loss.exp().item())
-        # optimize
-        self.optimize(loss)
-
-        # number of processed sentences / words
-        n_tokens = batch["n_tokens"]
-        self.n_sentences += batch_size
-        self.stats['processed_s'] += batch_size
-        self.stats['processed_w'] += n_tokens
-
-        del batch
-        del loss
-        del nll_loss
-        del tensor
-        #torch.cuda.empty_cache()
-
-    
     def valid_step(self):
         """
         Evaluate perplexity and next word prediction accuracy.
         """
-
-        self.iterators["valid"].tokens_per_batch = -1
-        self.iterators["valid"].batch_size = 32
         data_iter = iter(self.iterators["valid"].get_iterator(True, True))
 
         n_words = 0
         xe_loss = 0
         n_valid = 0
-        torch.cuda.empty_cache()
         
         with torch.no_grad():
+            torch.cuda.empty_cache()
             self.net.eval()
             self.criterion.eval()
             if config.multi_gpu:
                 net = self.net.module
             else:
                 net = self.net
-
+            
             for i_batch, raw_batch in enumerate(data_iter):
                 # generate batch
                 batch = get_batch(
@@ -482,14 +437,6 @@ class Enc_Dec_Trainer(Trainer):
                 n_words += batch["n_tokens"]
                 xe_loss += nll_loss.item() * batch["n_tokens"]
                 n_valid += (logits.max(-1)[1] == batch["target"]).sum().item()
-                
-                del logits
-                del loss
-                del nll_loss
-                del inputs
-                del loss_inputs
-                del batch
-                #torch.cuda.empty_cache()
 
         # compute perplexity and prediction accuracy
         scores = {}

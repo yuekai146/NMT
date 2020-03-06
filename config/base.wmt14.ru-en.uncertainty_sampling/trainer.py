@@ -255,16 +255,16 @@ class Trainer(object):
 
             if network_only == False:
                 # reload optimizers
-                self.opt.optimizer.load_state_dict(ckpt["opt"]["optimizer_state_dict"])
                 for k in ckpt["opt"].keys():
                     if k != "optimizer_state_dict":
                         setattr(self.opt, k, ckpt["opt"][k])
 
                 # reload main metrics
-                self.epoch = ckpt['epoch'] + 1
-                self.n_total_iter = ckpt['n_total_iter']
-                self.best_metrics = ckpt['best_metrics']
-                self.early_stopping_metrics = ckpt['early_stopping_metrics']
+                if config.optimizer_only == False:
+                    self.epoch = ckpt['epoch'] + 1
+                    self.n_total_iter = ckpt['n_total_iter']
+                    self.best_metrics = ckpt['best_metrics']
+                    self.early_stopping_metrics = ckpt['early_stopping_metrics']
             
             logger.warning(f"Checkpoint reloaded. Resuming at epoch {self.epoch} / iteration {self.n_total_iter} ...")
 
