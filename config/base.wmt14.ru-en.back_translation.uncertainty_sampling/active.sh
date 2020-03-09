@@ -208,5 +208,4 @@ function main () {
 }
 
 
-#main
-BT random 600000 11 3
+main

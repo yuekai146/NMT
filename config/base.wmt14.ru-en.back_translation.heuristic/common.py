@@ -70,7 +70,8 @@ class Config:
     epoch_size = 150
     continue_path = None
     dump_path = "checkpoints/"
-    reload_network_only = True
+    reload_network_only = False
+    optimizer_only = True
     clip_grad_norm = 0.0
     accumulate_gradients = 2
     save_periodic = 1
