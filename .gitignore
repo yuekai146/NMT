@@ -18,3 +18,4 @@ config/*/__pycache__/
 config/*/init/
 config/*/data/
 config/*/parallel_active.sh
+config/*/init/
